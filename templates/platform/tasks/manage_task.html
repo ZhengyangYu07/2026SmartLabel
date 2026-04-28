@@ -1,0 +1,153 @@
+{% extends 'platform/components/base.html' %}
+{% load static %}
+
+{% block title %}
+    管理任务
+{% endblock %}
+
+{% block breadcrumb %}
+    <span>数据标注 >> 管理任务</span>
+{% endblock %}
+
+{% block content %}
+<style>
+    .status-btn{
+        transition-property: background-color, color; /* 明确指定过渡属性 */
+        transition-duration: 200ms;
+        transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); /* 默认 ease */
+    }
+
+    .status-btn.active{
+        background-color: #3b82f6; 
+        color: white; 
+    }
+
+    .toast {
+        background: rgba(0,0,0,0.8);
+        color: white;
+    }
+    .toast.success { background: #48bb78; } 
+    .toast.error { background: #f56565; }   
+    .toast.info { background: #4299e1; }   
+
+
+    /* 收藏星标样式 - 关键修改在这里 */
+    .favorite-star {
+        z-index: 10;
+        font-size: 1.25rem;
+        transition: all 0.2s ease;
+        font-weight: 900; /* 加粗 */
+        color: #9ca3af; /* <--- 关键修改：默认灰色 */
+    }
+
+    /* 鼠标悬停效果（可选，但推荐） */
+    .favorite-star:hover {
+        transform: scale(1.1);
+        color: #ffc107; /* 悬停时也显示黄色，方便点击 */
+    }
+
+    /* 增强收藏后的星标颜色和效果 */
+    .favorite-star.is-favorite {
+        color: #ffc107; /* 更亮的金色，例如 Bootstrap 的 yellow */
+        text-shadow: 0 0 5px rgba(255, 193, 7, 0.7); /* 添加发光效果 */
+    }
+
+
+    /* 任务卡片通用样式 - 保持不变 */
+    .task-card {
+        border-radius: 0.5rem; 
+        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06); /* 轻微的阴影 */
+        transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+        background-color: #ffffff; /* 确保默认卡片是白色，以便背景颜色能正确覆盖 */
+        min-height: 180px; /* 从 .project-card 复制过来，确保高度一致 */
+    }
+
+    .task-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    }
+
+    /* 图像分类卡片背景 */
+    .task-card-image-classification {
+        background-color: #e0f2fe; /* 浅蓝色，类似 Tailwind 的 blue-100 */
+        border-color: #90cdf4; /* 稍微深一点的蓝色边框 */
+    }
+
+    /* 文本分类卡片背景 */
+    .task-card-text-classification {
+        background-color: #e6ffed; /* 浅绿色，类似 Tailwind 的 green-100 */
+        border-color: #9ae6b4; /* 稍微深一点的绿色边框 */
+    }
+</style>
+
+    <!-- 项目筛选与管理 -->
+    <div class="bg-white rounded-lg shadow-sm p-6">
+        <!-- 项目管理列表 -->
+        <div class="mb-6">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-4">我的项目</h2>
+
+            <div class="mb-6 space-y-4">
+                <!-- 状态筛选按钮 -->
+                <div class="flex flex-wrap gap-2">
+                    <button data-status="processing"
+                            class="status-btn px-4 py-2 rounded-full border hover:bg-gray-50">
+                        进行中
+                    </button>
+                    <button data-status="completed"
+                            class="status-btn px-4 py-2 rounded-full border hover:bg-gray-50">
+                        已完成
+                    </button>
+                </div>
+
+                <!-- 筛选条 -->
+                <div class="flex gap-4 items-center">
+                    <select id="task-type-filter" class="px-4 py-2 border rounded-lg pr-8">
+                        <option value="">所有类型</option>
+                        <option value="image-classification">图像分类</option>
+                        <option value="text-classification">文本分类</option>
+                    </select>
+                    <input type="text" id="task-name-filter" placeholder="输入任务名称"
+                           class="px-4 py-2 border rounded-lg flex-1">
+                    <button id="search-btn" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                        查询
+                    </button>
+                </div>
+            </div>
+
+            <div class="mb-4 px-4 py-2 bg-gray-50 rounded-lg" id="filter-status">
+                <span class="text-sm text-gray-600">当前筛选：</span>
+                <span id="active-filters"></span>
+            </div>
+
+            <!-- 项目列表容器 -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="project-list">
+                <!-- 动态加载项目卡片 -->
+            </div>
+        </div>
+
+        <!-- 分页控件 -->
+        <div class="flex items-center justify-between mt-6">
+            <div class="flex space-x-2">
+                <button id="prev-page"
+                        class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg disabled:opacity-50"
+                        disabled>
+                    上一页
+                </button>
+                <button id="next-page"
+                        class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg disabled:opacity-50"
+                        disabled>
+                    下一页
+                </button>
+            </div>
+            <span id="page-info" class="text-gray-600"></span>
+        </div>
+    </div>
+
+    <!-- 项目详情模态框 -->
+    <div id="project-detail-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50">
+        <div class="bg-white rounded-lg p-6 max-w-4xl mx-auto mt-20">
+            <!-- 模态框内容 -->
+        </div>
+    </div>
+<script src="{% static 'js/manage_task.js' %}"></script>
+{% endblock %}

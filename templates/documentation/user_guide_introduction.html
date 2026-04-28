@@ -1,0 +1,46 @@
+
+{%  extends 'platform/components/base_documents.html' %}
+
+
+{% block title %}
+    平台介绍
+{% endblock %}
+
+{% block breadcrumb %}
+    <span>平台介绍</span>
+{% endblock %}
+
+{% block content %}
+   
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body, html {
+            height: 100%;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: Arial, sans-serif;
+        }
+       .center-text {
+            text-indent:20px;
+            max-width: 600px;
+            padding: 20px;
+            background-color: #f8f8f8;
+            
+        }
+    </style>
+</head>
+<body>
+    <div class="center-text">
+        {% load static %}
+        <img src="{% static 'img/documents/production.png' %}" >
+        <p>SmartLabel 是一款基于Pytorch+Django的平台，依托于半监督学习算法的应用，免去人工数据标注需要构建自动标注系统的麻烦，实现半自动标注。</p>
+        <p>SmartLabel通过预训练模型，根据用户上传的数据得到数据集,调用内嵌的相关模型进行标注,将智能标注结果返回给用户.可以有效降低数据标注复杂度,解决对用户不友好等问题.</p>
+        <p>在未来，SmartLabel 会朝着服务化、智能化、场景化的方向发展，举个例子，标注一个数据集不再需要编写代码，而是通过在页面上点点按键就可以完成；另外，会实现用户上传数据集多样化的标注任务功能,以及进一步训练多种半监督算法模型供调用。真正使数据标注成为门槛很低的一种服务。</p>
+    </div>
+</body>
+
+{% endblock %}

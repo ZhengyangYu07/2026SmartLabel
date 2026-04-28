@@ -1,0 +1,108 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+    <meta charset="UTF-8">
+    <title>SmartLabel - 登录</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
+</head>
+<body class="min-h-screen overflow-hidden">
+<div class="relative min-h-screen flex">
+    <!-- 左侧背景区 -->
+    <div class="w-1/2 hidden md:flex flex-auto items-center justify-center p-10
+               bg-gradient-to-br from-purple-900 to-blue-800 relative">
+        <div class="absolute inset-0 z-0">
+            <ul class="circles">
+                {% for _ in '..........' %}
+                    <li style="left: {{ forloop.counter|add:'-1' }}0%"></li>
+                {% endfor %}
+            </ul>
+        </div>
+
+        <div class="relative z-10 text-center max-w-2xl">
+            <h1 class="text-5xl lg:text-6xl font-bold text-amber-400 animate-pulse">
+                SmartLabel
+            </h1>
+            <p class="mt-6 text-xl text-gray-200 font-medium">
+                欢迎回到智能标注平台
+            </p>
+        </div>
+    </div>
+
+    <!-- 右侧表单区 -->
+    <div class="w-full md:w-1/2 flex items-center justify-center p-8 bg-white">
+        <div class="max-w-md w-full space-y-8">
+            <div class="text-center">
+                <h2 class="text-4xl font-bold text-gray-800">
+                    <i class="fas fa-sign-in-alt text-blue-500 mr-3"></i>用户登录
+                </h2>
+                <p class="mt-4 text-gray-500">
+                    继续您的标注项目
+                </p>
+            </div>
+
+            <form class="mt-8 space-y-6" action="#" method="POST">
+                {% csrf_token %}
+                <div class="space-y-5">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            <i class="fas fa-user text-blue-400 mr-2"></i>用户名
+                        </label>
+                        <input class="w-full px-4 py-3 border border-gray-200 rounded-xl
+                                   focus:ring-2 focus:ring-blue-400 focus:border-blue-400
+                                   transition-all placeholder-gray-400"
+                               type="text" name="username" value="{{ request.POST.username }}" required
+                               placeholder="请输入用户名">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            <i class="fas fa-lock text-blue-400 mr-2"></i>密码
+                        </label>
+                        <input class="w-full px-4 py-3 border border-gray-200 rounded-xl
+                                   focus:ring-2 focus:ring-blue-400 focus:border-blue-400
+                                   transition-all placeholder-gray-400"
+                               type="password" name="password" required
+                               placeholder="输入登录密码">
+                    </div>
+
+                    <div class="flex items-center justify-between">
+                        <label class="flex items-center text-sm text-gray-600">
+                            <input type="checkbox"
+                                   class="h-4 w-4 text-blue-500 focus:ring-blue-400">
+                            <span class="ml-2">保持登录</span>
+                        </label>
+                        <a href="{% url 'user_forget' %}" class="text-sm text-blue-500 hover:text-blue-600">
+                            忘记密码？
+                        </a>
+                    </div>
+
+                    {% if error_message %}
+                        <div class="text-red-500 px-4 py-3 rounded-lg bg-red-50">
+                            {{ error_message }}
+                        </div>
+                    {% endif %}
+                </div>
+
+                <button type="submit"
+                        class="w-full py-4 bg-gradient-to-r from-blue-500 to-indigo-600
+                              text-white rounded-xl font-bold text-lg
+                              shadow-lg hover:shadow-xl hover:from-indigo-500 hover:to-blue-500
+                              transition-all duration-300">
+                    立即登录
+                </button>
+
+                <p class="text-center text-gray-500">
+                    新用户？
+                    <a href="{% url 'user_register' %}"
+                       class="text-blue-500 hover:text-blue-600 font-medium">
+                        立即注册
+                    </a>
+                </p>
+            </form>
+        </div>
+    </div>
+</div>
+</body>
+</html>

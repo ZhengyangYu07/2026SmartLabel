@@ -1,0 +1,286 @@
+{% extends "platform/components/base_task_h.html" %} {% load static %} {% block task_table %}
+<div
+  id="unlabeled-panel"
+  class="bg-white rounded-xl shadow-md border border-gray-100 p-5 space-y-4"
+>
+  <div class="flex items-center justify-between flex-wrap gap-3">
+    <div class="text-sm text-gray-600">每页 10 条，默认按最新进入在前</div>
+    <div class="flex items-center gap-2">
+      <label for="confidence-sort" class="text-sm text-gray-700"
+        >置信度排序</label
+      >
+      <select
+        id="confidence-sort"
+        class="border border-gray-300 rounded px-2 py-1 text-sm"
+      >
+        <option value="default">默认（最新）</option>
+        <option value="desc">从高到低</option>
+        <option value="asc">从低到高</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm text-left">
+      <thead class="bg-gray-50 text-gray-700">
+        <tr>
+          <th class="px-4 py-3">ID</th>
+          <th class="px-4 py-3">内容</th>
+          <th class="px-4 py-3">预测标签</th>
+          <th class="px-4 py-3">置信度</th>
+          <th class="px-4 py-3">操作</th>
+        </tr>
+      </thead>
+      <tbody id="unlabeled-table-body" class="divide-y divide-gray-100"></tbody>
+    </table>
+  </div>
+</div>
+
+<div
+  id="image-modal"
+  class="hidden fixed inset-0 z-[200] bg-black/80 items-center justify-center p-6"
+  onclick="closeModal(event)"
+>
+  <img
+    id="modal-image"
+    src=""
+    alt="预览"
+    class="max-w-[90vw] max-h-[90vh] object-contain rounded-lg"
+  />
+</div>
+{% endblock %} {% block js %} {{ block.super }}
+<script>
+  const taskId = "{{ task.id }}";
+  const pageSize = 10;
+  window.currentPage = 1;
+  window.totalPages = 1;
+  let confidenceSort = "default";
+
+  function openModal(url) {
+    const modal = document.getElementById("image-modal");
+    const image = document.getElementById("modal-image");
+    image.src = url;
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
+  }
+
+  function closeModal(event) {
+    if (event.target.id !== "image-modal") {
+      return;
+    }
+    const modal = document.getElementById("image-modal");
+    modal.classList.add("hidden");
+    modal.classList.remove("flex");
+  }
+
+  function formatScore(v) {
+    const n = Number(v);
+    if (Number.isNaN(n)) return "-";
+    return n.toFixed(4);
+  }
+
+  async function fetchUnlabeledPage(page) {
+    const params = new URLSearchParams({
+      predicted_only: "1",
+      status: "未校验",
+      page: String(page),
+      page_size: String(pageSize),
+    });
+
+    if (confidenceSort === "desc") {
+      params.set("sort", "confidence:desc");
+    } else if (confidenceSort === "asc") {
+      params.set("sort", "confidence:asc");
+    }
+
+    const resp = await fetch(`/tasks/${taskId}/data/?${params.toString()}`);
+    if (!resp.ok) {
+      throw new Error("加载未标注数据失败");
+    }
+    return await resp.json();
+  }
+
+  async function addToLabeled(itemId, label) {
+    const body = new URLSearchParams({ item_id: String(itemId), label });
+    const resp = await fetch(
+      `/tasks/${taskId}/manual_annotation/add_unlabeled/`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-CSRFToken": window.getCookie("csrftoken"),
+        },
+        body,
+      },
+    );
+    const data = await resp.json();
+    if (!resp.ok || data.status !== "success") {
+      throw new Error(data.message || "添加失败");
+    }
+  }
+
+  function updatePagination(page, pages) {
+    window.currentPage = page;
+    window.totalPages = pages;
+
+    const currentPageSpan = document.getElementById("current-page");
+    const totalPagesSpan = document.getElementById("total-pages");
+    const prevPageBtn = document.getElementById("prev-page");
+    const nextPageBtn = document.getElementById("next-page");
+    const pageInput = document.getElementById("page-input");
+
+    if (currentPageSpan)
+      currentPageSpan.textContent = String(window.currentPage);
+    if (totalPagesSpan) totalPagesSpan.textContent = String(window.totalPages);
+    if (prevPageBtn) prevPageBtn.disabled = window.currentPage <= 1;
+    if (nextPageBtn)
+      nextPageBtn.disabled = window.currentPage >= window.totalPages;
+    if (pageInput) pageInput.value = String(window.currentPage);
+  }
+
+  function goToPage() {
+    const pageInput = document.getElementById("page-input");
+    if (!pageInput) return;
+    const targetPage = parseInt(pageInput.value, 10);
+    if (
+      Number.isNaN(targetPage) ||
+      targetPage < 1 ||
+      targetPage > window.totalPages
+    ) {
+      window.showMessage(`请输入有效页码(1-${window.totalPages})`, "warning");
+      return;
+    }
+    loadPage(targetPage);
+  }
+
+  function ensurePaginationControls() {
+    if (document.getElementById("pagination")) {
+      return;
+    }
+
+    const panel = document.getElementById("unlabeled-panel");
+    if (!panel) {
+      return;
+    }
+
+    const wrapper = document.createElement("div");
+    wrapper.id = "pagination";
+    wrapper.className = "mt-4 flex items-center justify-center gap-2 flex-wrap";
+    wrapper.innerHTML = `
+      <button id="prev-page" class="pagination-button" onclick="loadPage(window.currentPage - 1)" disabled>&lt; 上一页</button>
+      <span id="current-page">1</span>
+      <span>/</span>
+      <span id="total-pages">1</span>
+      <button id="next-page" class="pagination-button" onclick="loadPage(window.currentPage + 1)" disabled>下一页 &gt;</button>
+      <input type="number" id="page-input" placeholder="输入页码" min="1" class="border border-gray-300 rounded px-2 py-1 w-24 text-center" />
+      <button id="go-to-page" class="pagination-button" onclick="goToPage()">跳转</button>
+    `;
+
+    panel.appendChild(wrapper);
+  }
+
+  async function loadPage(page = 1) {
+    const tbody = document.getElementById("unlabeled-table-body");
+    tbody.innerHTML =
+      '<tr><td class="px-4 py-6 text-center text-gray-500" colspan="5">加载中...</td></tr>';
+
+    try {
+      const data = await fetchUnlabeledPage(page);
+      const items = data.results || [];
+      updatePagination(data.page || 1, data.total_pages || 1);
+
+      if (items.length === 0) {
+        tbody.innerHTML =
+          '<tr><td class="px-4 py-6 text-center text-gray-500" colspan="5">暂无未标注样本</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = items
+        .map((item) => {
+          const safeLabel = (item.label || "").replace(/"/g, "&quot;");
+          const imageUrl = item.relative_image_url || "";
+          return `
+          <tr data-row-id="${item.id}">
+            <td class="px-4 py-3">${item.sequence_number}</td>
+            <td class="px-4 py-3">
+              ${
+                imageUrl
+                  ? `<img src="${imageUrl}" alt="${item.image_name || "图片"}" class="w-14 h-14 object-cover rounded cursor-zoom-in" data-full="${imageUrl}" />`
+                  : '<span class="text-gray-400">无图片</span>'
+              }
+            </td>
+            <td class="px-4 py-3">
+              <input type="text" value="${safeLabel}" class="pred-label-input w-full border border-gray-300 rounded px-2 py-1" data-id="${item.id}" />
+            </td>
+            <td class="px-4 py-3">${formatScore(item.confidence)}</td>
+            <td class="px-4 py-3">
+              <button class="add-btn px-3 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700" data-id="${item.id}">添加</button>
+            </td>
+          </tr>
+        `;
+        })
+        .join("");
+
+      async function performAdd(rowId) {
+        const input = document.querySelector(
+          `.pred-label-input[data-id="${rowId}"]`,
+        );
+        if (!input) return;
+        const label = input.value.trim();
+        if (!label) {
+          window.showMessage("标签不能为空", "warning");
+          return;
+        }
+        try {
+          await addToLabeled(rowId, label);
+          window.showMessage("已加入已标注列表（状态：未校验）", "success");
+          await loadPage(window.currentPage);
+          window.updateStats();
+        } catch (error) {
+          window.showMessage(error.message, "error");
+        }
+      }
+
+      document.querySelectorAll(".add-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          await performAdd(btn.dataset.id);
+        });
+      });
+
+      document.querySelectorAll(".pred-label-input").forEach((input) => {
+        input.addEventListener("keydown", async (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            await performAdd(input.dataset.id);
+          }
+        });
+        input.addEventListener("blur", async () => {
+          await performAdd(input.dataset.id);
+        });
+      });
+
+      document.querySelectorAll("img[data-full]").forEach((img) => {
+        img.addEventListener("click", () => openModal(img.dataset.full));
+      });
+    } catch (error) {
+      tbody.innerHTML = `<tr><td class="px-4 py-6 text-center text-red-500" colspan="5">${error.message}</td></tr>`;
+      updatePagination(1, 1);
+    }
+  }
+
+  window.loadPage = loadPage;
+  window.goToPage = goToPage;
+
+  document.addEventListener("DOMContentLoaded", () => {
+    ensurePaginationControls();
+
+    const sortSelect = document.getElementById("confidence-sort");
+    sortSelect.addEventListener("change", async () => {
+      confidenceSort = sortSelect.value;
+      await loadPage(1);
+    });
+
+    loadPage(1);
+  });
+</script>
+{% endblock %}

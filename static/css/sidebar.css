@@ -1,0 +1,47 @@
+/* 折叠状态样式 */
+.sidebar-collapsed {
+    width: 4rem !important;
+}
+
+.sidebar-collapsed .sidebar-text,
+.sidebar-collapsed .sidebar-brand,
+.sidebar-collapsed .submenu-arrow {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+    position: absolute;
+}
+
+.sidebar-collapsed .menu-item {
+    justify-content: center;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+}
+
+.sidebar-collapsed .fa-bars:before {
+    content: "\f061";
+}
+
+select {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%233b82f6'%3e%3cpath d='M7 10l5 5 5-5z'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 1.5em;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+}
+
+/* 文件上传区域悬停效果 */
+.upload-hover:hover {
+    border-color: #3b82f6;
+    background-color: rgba(59, 130, 246, 0.05);
+}
+
+/* 自定义成功提示样式 */
+.toast-success {
+    background: #4CAF50 !important;
+    color: white !important;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}

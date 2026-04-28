@@ -1,0 +1,92 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+    <meta charset="UTF-8">
+    <title>SmartLabel - 找回密码</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
+</head>
+<body class="min-h-screen overflow-hidden">
+<div class="relative min-h-screen flex">
+    <!-- 左侧背景区 -->
+    <div class="w-1/2 hidden md:flex flex-auto items-center justify-center p-10
+               bg-gradient-to-br from-purple-900 to-blue-800 relative">
+        <div class="absolute inset-0 z-0">
+            <ul class="circles">
+                {% for _ in '..........' %}
+                    <li style="left: {{ forloop.counter|add:'-1' }}0%"></li>
+                {% endfor %}
+            </ul>
+        </div>
+
+        <div class="relative z-10 text-center max-w-2xl">
+            <h1 class="text-5xl lg:text-6xl font-bold text-amber-400 animate-pulse">
+                SmartLabel
+            </h1>
+            <p class="mt-6 text-xl text-gray-200 font-medium">
+                欢迎回到智能标注平台
+            </p>
+        </div>
+    </div>
+
+    <!-- 右侧表单区 -->
+    <div class="w-full md:w-1/2 flex items-center justify-center p-8 bg-white">
+        <div class="max-w-md w-full space-y-8">
+            <div class="text-center">
+                <h2 class="text-4xl font-bold text-gray-800">
+                    <i class="fas fa-unlock-alt text-blue-500 mr-3"></i>找回密码
+                </h2>
+                <p class="mt-4 text-gray-500">
+                    请填写您的注册邮箱
+                </p>
+            </div>
+
+            <form class="mt-8 space-y-6" action="#" method="POST">
+                {% csrf_token %}
+                <div class="space-y-5">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            <i class="fas fa-envelope text-blue-400 mr-2"></i>注册邮箱
+                        </label>
+                        <input class="w-full px-4 py-3 border border-gray-200 rounded-xl
+                                   focus:ring-2 focus:ring-blue-400 focus:border-blue-400
+                                   transition-all placeholder-gray-400"
+                               type="email" name="email" value="{{ request.POST.email }}" required
+                               placeholder="请输入注册邮箱">
+                    </div>
+
+                    {% if error_message %}
+                        <div class="text-red-500 px-4 py-3 rounded-lg bg-red-50">
+                            {{ error_message }}
+                        </div>
+                    {% endif %}
+
+                    {% if success_message %}
+                        <div class="text-green-500 px-4 py-3 rounded-lg bg-green-50">
+                            {{ success_message }}
+                        </div>
+                    {% endif %}
+                </div>
+
+                <button type="submit"
+                        class="w-full py-4 bg-gradient-to-r from-blue-500 to-indigo-600
+                              text-white rounded-xl font-bold text-lg
+                              shadow-lg hover:shadow-xl hover:from-indigo-500 hover:to-blue-500
+                              transition-all duration-300">
+                    发送重置链接
+                </button>
+
+                <p class="text-center text-gray-500">
+                    想起密码了？
+                    <a href="{% url 'user_login' %}"
+                       class="text-blue-500 hover:text-blue-600 font-medium">
+                        返回登录
+                    </a>
+                </p>
+            </form>
+        </div>
+    </div>
+</div>
+</body>
+</html>

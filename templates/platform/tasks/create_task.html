@@ -1,0 +1,531 @@
+{% extends 'platform/components/base.html' %} {% load static %} {% block title%}
+创建任务 {% endblock %} {% block breadcrumb %}
+<span>数据标注 >> 创建任务</span>
+{% endblock %} {% block content %}
+<div class="max-w-4xl mx-auto bg-white rounded-xl shadow-md p-8">
+  <h2 class="text-3xl font-bold text-gray-800 mb-8">
+    <i class="fas fa-plus-circle text-blue-500 mr-2"></i>创建新标注任务
+  </h2>
+
+  <form
+    id="create-form"
+    method="post"
+    enctype="multipart/form-data"
+    class="space-y-6"
+    x-data="createForm()"
+    @submit.prevent="handleSubmit"
+  >
+    <!-- 关键修改：拦截 submit 事件 -->
+    {% csrf_token %}
+    <!-- 全屏检验加载遮罩层 -->
+    <div
+      x-show="isProcessingOverlayVisible"
+      x-cloak
+      class="fixed inset-0 bg-gray-900 bg-opacity-60 flex items-center justify-center z-50"
+    >
+      <div class="text-center text-white p-6 rounded-lg">
+        <i class="fas fa-spinner fa-spin text-4xl mb-4"></i>
+        <p class="text-lg font-semibold" x-text="overlayMessage"></p>
+        <!-- 修改点: 使用 overlayMessage 动态显示文本 -->
+        <p class="text-sm">此过程不可中断</p>
+      </div>
+    </div>
+
+    <!-- 错误提示框 (提交时的通用错误) -->
+    {% if error_messages %}
+    <div class="bg-red-50 text-red-700 p-4 rounded-lg">
+      {% for error in error_messages %}
+      <p class="flex items-center">
+        <i class="fas fa-exclamation-circle mr-2"></i>{{ error }}
+      </p>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- 数据文件校验提示框 -->
+    <div
+      x-show="validationMessage"
+      x-cloak
+      class="p-4 rounded-lg mt-4"
+      :class="{
+                 'bg-green-50 text-green-700': validationMessageType === 'success',
+                 'bg-red-50 text-red-700': validationMessageType === 'error',
+                 'bg-blue-50 text-blue-700': validationMessageType === 'info'
+             }"
+    >
+      <p class="flex items-center">
+        <i
+          class="mr-2"
+          :class="{
+                       'fas fa-check-circle': validationMessageType === 'success',
+                       'fas fa-exclamation-circle': validationMessageType === 'error',
+                       'fas fa-info-circle': validationMessageType === 'info'
+                   }"
+        ></i>
+        <span x-text="validationMessage"></span>
+      </p>
+    </div>
+
+    <div class="space-y-8">
+      <!-- 任务名称 -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          <i class="fas fa-tag text-blue-500 mr-2"></i>任务名称
+          <span class="text-red-500">*</span>
+        </label>
+        <input
+          type="text"
+          name="task_name"
+          x-ref="task_name"
+          required
+          class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-400 placeholder-gray-400"
+          placeholder="请输入任务名称（不超过50字符）"
+        />
+      </div>
+
+      <!-- 任务描述 -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          <i class="fas fa-align-left text-blue-500 mr-2"></i>任务描述
+        </label>
+        <textarea
+          name="task_desc"
+          rows="3"
+          class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-400 placeholder-gray-400"
+          placeholder="请输入任务描述（可选）"
+        ></textarea>
+      </div>
+
+      <!-- 目标任务 -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          <i class="fas fa-clipboard-check text-blue-500 mr-2"></i>目标任务
+          <span class="text-red-500">*</span>
+        </label>
+        <select
+          name="task_type"
+          x-ref="task_type"
+          required
+          x-model="task_type"
+          class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white appearance-none"
+        >
+          <option value="" disabled selected>请选择您的目标任务</option>
+          <option value="image-classification">图像分类</option>
+          <option value="text-classification">文本分类</option>
+        </select>
+      </div>
+
+      <input type="hidden" name="labeling_type" x-model="labeling_type" />
+
+      <!-- 数据上传 -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          <i class="fas fa-file-archive text-blue-500 mr-2"></i>数据上传
+          <span class="text-red-500">*</span>
+        </label>
+        <div class="flex items-center justify-center w-full">
+          <label
+            class="relative flex flex-col w-full border-2 border-dashed border-gray-300 hover:border-blue-500 rounded-lg cursor-pointer transition-colors h-32 items-center justify-center"
+          >
+            <input
+              type="file"
+              name="data_file"
+              id="data_file"
+              class="absolute inset-0 opacity-0 cursor-pointer"
+              accept=".zip,.rar,.7z"
+              :disabled="isDataFileValidating"
+              @change="handleDataFileChange($event)"
+            />
+            <template x-if="!dataFileName">
+              <div class="text-center">
+                <i
+                  class="fas fa-cloud-upload-alt text-3xl text-gray-400 mb-2"
+                ></i>
+                <p
+                  x-show="task_type === 'image-classification'"
+                  class="text-gray-500"
+                >
+                  点击上传图像数据文件...（内容支持.jpg|.png|.jpeg格式
+                  以压缩包的形式上传）
+                </p>
+                <p
+                  x-show="task_type === 'text-classification'"
+                  class="text-gray-500"
+                >
+                  点击上传文本数据文件...（内容支持.csv格式 以压缩包的形式上传）
+                </p>
+                <p x-show="!task_type" class="text-gray-500">
+                  请先选择目标任务，再上传数据文件
+                </p>
+                <p class="text-xs text-gray-400 mt-1">
+                  支持上传文件格式：.zip|.rar|.7z格式（注意：单个数据文件不能超过2GB）
+                </p>
+              </div>
+            </template>
+            <template x-if="dataFileName">
+              <div class="text-center">
+                <i
+                  class="fas fa-file-archive text-3xl mb-2"
+                  :class="{
+                                       'text-red-500': validationMessageType === 'error' && !data_file_validated,
+                                       'text-green-500': validationMessageType === 'success' && data_file_validated,
+                                       'text-blue-500': isDataFileValidating && validationMessageType === 'info'
+                                   }"
+                ></i>
+                <p
+                  class="text-sm font-semibold"
+                  x-text="dataFileName"
+                  :class="{
+                                       'text-red-700': validationMessageType === 'error' && !data_file_validated,
+                                       'text-green-700': validationMessageType === 'success' && data_file_validated,
+                                       'text-blue-700': isDataFileValidating && validationMessageType === 'info'
+                                   }"
+                ></p>
+                <p class="text-xs text-gray-400 mt-1">点击可重新选择</p>
+              </div>
+            </template>
+          </label>
+        </div>
+      </div>
+
+      <!-- 标注上传 -->
+      <div>
+        <label
+          class="block text-sm font-medium text-gray-700 mb-2 flex items-center"
+        >
+          <i class="fas fa-file-alt text-blue-500 mr-2"></i>标注上传
+          <span class="text-gray-400 text-xs ml-1">（可选）</span>
+          <span class="relative ml-2 cursor-pointer group">
+            <i class="fas fa-question-circle text-gray-400 text-sm"></i>
+            <div
+              class="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 w-72 px-3 py-2 text-xs text-white bg-gray-800 rounded-md shadow-lg z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none"
+            >
+              <p x-show="task_type === 'image-classification'">
+                支持 .csv格式，首行属性必须包含 'filename' 和
+                'class'，分别表示文件名和标签，每行显示一个样本的标注信息。<br />
+                <strong>示例:</strong> `image1.png,frog`
+              </p>
+              <p x-show="task_type === 'text-classification'">
+                支持 .csv格式，首行属性必须包含 'text' 和
+                'label'，分别表示文本内容和标签，每行显示一个样本的标注信息。<br />
+                <strong>示例:</strong> `"This is a text...",test`
+              </p>
+            </div>
+          </span>
+        </label>
+        <div class="flex items-center justify-center w-full">
+          <label
+            class="relative flex flex-col w-full border-2 border-dashed border-gray-300 hover:border-blue-500 rounded-lg cursor-pointer transition-colors h-32 items-center justify-center"
+          >
+            <input
+              type="file"
+              name="label_file"
+              id="label_file"
+              accept=".csv"
+              class="absolute inset-0 opacity-0 cursor-pointer"
+              @change="labelFileName = $event.target.files.length ? $event.target.files[0].name : ''"
+            />
+            <template x-if="!labelFileName">
+              <div class="text-center">
+                <i class="fas fa-file-import text-3xl text-gray-400 mb-2"></i>
+                <p class="text-gray-500">点击上传标注文件...</p>
+                <p class="text-xs text-gray-400 mt-1">支持单个 .csv 文件</p>
+              </div>
+            </template>
+            <template x-if="labelFileName">
+              <div class="text-center">
+                <i class="fas fa-file-alt text-3xl text-green-500 mb-2"></i>
+                <p
+                  class="text-sm font-semibold text-green-700"
+                  x-text="labelFileName"
+                ></p>
+                <p class="text-xs text-gray-400 mt-1">点击可重新选择</p>
+              </div>
+            </template>
+          </label>
+        </div>
+      </div>
+
+      <!-- 模型配置 -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          <i class="fas fa-cogs text-blue-500 mr-2"></i>模型配置
+          <span class="text-red-500">*</span>
+        </label>
+        <div>
+          <label class="block text-sm text-gray-600 mb-1">模型强度</label>
+          <select
+            name="model_strength"
+            class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
+          >
+            <option value="small">低</option>
+            <option value="medium">中</option>
+            <option value="high">高</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="flex justify-end space-x-4 mt-8">
+        <button
+          type="button"
+          id="save-draft"
+          class="px-6 py-3 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50"
+        >
+          <i class="fas fa-save mr-2"></i>暂存草稿
+        </button>
+        <button
+          type="submit"
+          class="px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg font-semibold shadow-md hover:from-emerald-500 hover:to-green-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          :disabled="!data_file_validated || isDataFileValidating || isSubmitting"
+        >
+          <i class="fas fa-check mr-2"></i>确认提交
+        </button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<!-- Alpine.js script (内联在 HTML 中，以确保 Alpine.data 定义在 DOM 渲染时可用) -->
+<script>
+  document.addEventListener("alpine:init", () => {
+    Alpine.data("createForm", () => ({
+      labeling_type: "pre-trained",
+      task_type: "",
+      dataFileName: "",
+      labelFileName: "",
+      isSubmitting: false,
+      data_file_validated: false /* 数据文件内容校验是否成功 */,
+      validationMessage: "" /* 校验提示信息 */,
+      validationMessageType: "" /* 校验提示信息类型 (success/error/info) */,
+      isDataFileValidating: false /* 数据文件是否正在校验中 */,
+      isProcessingOverlayVisible: false /* 控制全屏遮罩层 */,
+      overlayMessage: "正在处理，请稍候..." /* 新增：遮罩层默认文本 */,
+
+      /* ---------- Alpine.js 方法用于处理数据文件选择和校验 ---------- */
+      async handleDataFileChange(event) {
+        const fileInput = event.target;
+        const file = fileInput.files[0];
+
+        /* 每次选择新文件时，重置所有校验相关状态 */
+        this.data_file_validated = false;
+        this.isDataFileValidating = false;
+        this.isProcessingOverlayVisible = false;
+        this.validationMessage = "";
+        this.validationMessageType = "";
+        this.overlayMessage = "正在处理，请稍候..."; // 重置遮罩文本
+
+        if (!file) {
+          this.dataFileName = "";
+          return;
+        }
+
+        /* 更新文件名显示 */
+        this.dataFileName = file.name;
+
+        /* 客户端初步校验：文件大小 */
+        if (file.size > 2 * 1024 * 1024 * 1024) {
+          /* 2GB */
+          this.validationMessage = "数据文件不能超过 2GB";
+          this.validationMessageType = "error";
+          fileInput.value = "";
+          this.dataFileName = "";
+          return;
+        }
+
+        /* 客户端初步校验：任务类型是否已选择 */
+        if (!this.task_type) {
+          this.validationMessage = "请先选择目标任务类型！";
+          this.validationMessageType = "error";
+          fileInput.value = "";
+          this.dataFileName = "";
+          return;
+        }
+
+        /* 启动校验状态，显示遮罩层，禁用输入框 */
+        this.isProcessingOverlayVisible = true;
+        this.isDataFileValidating = true;
+        this.overlayMessage = "正在校验数据文件内容，请稍候..."; // 设置校验时的遮罩文本
+        this.validationMessage = "正在校验数据文件内容，请稍候...";
+        this.validationMessageType = "info";
+
+        const formData = new FormData();
+        formData.append("data_file", file);
+        formData.append("task_type", this.task_type);
+
+        try {
+          const csrfToken = document.querySelector(
+            'input[name="csrfmiddlewaretoken"]',
+          ).value;
+          const response = await fetch("/api/validate_data_file/", {
+            method: "POST",
+            body: formData,
+            headers: {
+              "X-CSRFToken": csrfToken,
+            },
+          });
+          const result = await response.json();
+
+          if (response.ok) {
+            this.data_file_validated = true;
+            this.validationMessage = result.message;
+            this.validationMessageType = "success";
+          } else {
+            throw new Error(result.message || "文件校验失败");
+          }
+        } catch (error) {
+          this.data_file_validated = false;
+          this.validationMessage = `校验失败: ${error.message}`;
+          this.validationMessageType = "error";
+          fileInput.value = "";
+          this.dataFileName = "";
+        } finally {
+          this.isProcessingOverlayVisible = false;
+          this.isDataFileValidating = false;
+          this.overlayMessage = "正在处理，请稍候..."; // 校验完成后重置遮罩文本
+
+          if (
+            this.validationMessageType === "success" ||
+            this.validationMessageType === "error"
+          ) {
+            setTimeout(() => {
+              this.validationMessage = "";
+              this.validationMessageType = "";
+            }, 4000);
+          }
+        }
+      },
+
+      /* 处理表单提交 */
+      async handleSubmit() {
+        if (this.isSubmitting) {
+          return;
+        }
+
+        this.isSubmitting = true;
+
+        const form = this.$el;
+        let activeSubmitBtn = null;
+        let originalBtnHtml = "";
+
+        try {
+          const errors = [];
+          const dataFileInput = document.getElementById("data_file");
+          const labelFileInput = document.getElementById("label_file");
+
+          this.labeling_type =
+            labelFileInput && labelFileInput.files.length > 0
+              ? "semi-supervised"
+              : "pre-trained";
+
+          if (!this.$refs.task_name.value.trim())
+            errors.push("任务名称不能为空");
+          if (!this.task_type) errors.push("请选择目标任务");
+
+          if (!dataFileInput || dataFileInput.files.length === 0) {
+            errors.push("请上传数据文件");
+          } else if (!this.data_file_validated) {
+            errors.push("数据文件尚未通过内容校验，请等待或重新上传。");
+          }
+
+          if (this.isDataFileValidating) {
+            errors.push("数据文件正在校验中，请稍候...");
+          }
+
+          if (errors.length > 0) {
+            this.displayValidationMessage(errors.join("; "), "error");
+            return;
+          }
+
+          activeSubmitBtn = form.querySelector('button[type="submit"]');
+          if (activeSubmitBtn) {
+            originalBtnHtml = activeSubmitBtn.innerHTML;
+            activeSubmitBtn.disabled = true;
+            activeSubmitBtn.innerHTML =
+              '<i class="fas fa-spinner fa-spin mr-2"></i>正在提交...';
+          }
+
+          this.isProcessingOverlayVisible = true;
+          this.overlayMessage = "正在提交任务，请稍候..."; // 设置提交时的遮罩文本
+          this.validationMessage = "正在提交任务，请稍候..."; // 确保下方提示也更新
+          this.validationMessageType = "info"; // 提示类型也设为 info
+
+          const formData = new FormData(form);
+          formData.set("labeling_type", this.labeling_type);
+          const csrfToken = form.elements.csrfmiddlewaretoken.value;
+
+          const response = await fetch("/api/submit_task/", {
+            method: "POST",
+            body: formData,
+            headers: { "X-CSRFToken": csrfToken },
+          });
+
+          const result = await response.json();
+
+          if (!response.ok) {
+            throw new Error(
+              result.message || `提交失败，状态码：${response.status}`,
+            );
+          }
+
+          if (result.status === "success") {
+            this.displayValidationMessage(
+              "任务提交成功！正在跳转...",
+              "success",
+            );
+
+            fetch("/api/clear_draft/", {
+              method: "POST",
+              headers: { "X-CSRFToken": csrfToken },
+            }).catch((err) => console.error("清空草稿失败:", err));
+
+            this.data_file_validated = false;
+            this.validationMessage = "";
+            this.validationMessageType = "";
+            this.dataFileName = "";
+            this.labelFileName = "";
+            this.labeling_type = "pre-trained";
+            this.isDataFileValidating = false;
+            this.isProcessingOverlayVisible = false;
+            this.overlayMessage = "正在处理，请稍候..."; // 提交完成，重置遮罩文本
+
+            document.getElementById("data_file").value = "";
+            document.getElementById("label_file").value = "";
+
+            setTimeout(() => {
+              window.location.href = `/tasks/${result.task_id}/detail/`;
+            }, 1500);
+          } else {
+            throw new Error(result.message || "发生未知错误");
+          }
+        } catch (error) {
+          this.displayValidationMessage(`提交失败: ${error.message}`, "error");
+        } finally {
+          this.isProcessingOverlayVisible = false;
+          this.overlayMessage = "正在处理，请稍候..."; // 隐藏提交时的遮罩并重置文本
+          this.isSubmitting = false;
+          if (activeSubmitBtn) {
+            activeSubmitBtn.disabled = false;
+            activeSubmitBtn.innerHTML = originalBtnHtml;
+          }
+        }
+      },
+
+      /* 通用方法：在外部JS中使用Alpine的显示消息逻辑 */
+      displayValidationMessage(message, type) {
+        this.validationMessage = message;
+        this.validationMessageType = type;
+        if (type === "success" || type === "error") {
+          setTimeout(() => {
+            this.validationMessage = "";
+            this.validationMessageType = "";
+          }, 4000);
+        }
+      },
+    }));
+  });
+</script>
+
+<!-- 主要用于非 Alpine.js 绑定的功能 -->
+<script src="{% static 'js/create_task.js' %}"></script>
+{% endblock %}

@@ -1,0 +1,300 @@
+table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+}
+th {
+    border: 1px solid #ccc;
+    padding: 8px;
+    text-align: center;
+    position: relative;
+    background-color: #f2f2f2;
+}
+td {
+    border: 1px solid #ccc;
+    padding: 8px;
+    text-align: center;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+
+
+tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+tr:hover {
+    background-color: #f1f1f1;
+}
+
+/* 下拉菜单容器样式 */
+.dropdown-container {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 100px; /* 正方形的边长 */
+    height: 50px; /* 正方形的边长 */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* 下拉菜单样式 */
+.filter-dropdown {
+    width: 100%;
+    height: 100%;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    padding: 0;
+    appearance: none; /* 去掉默认的下拉箭头 */
+    background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>') no-repeat center center / 12px 12px;
+    background-color: white; /* 添加背景颜色，避免箭头与输入框内容重叠 */
+    text-indent: 25px; /* 添加文本缩进，使文本内容不与箭头重叠 */
+
+
+}
+/* 多选下拉框样式 */
+.custom-select {
+    position: relative;
+    display: inline-block;
+}
+
+.select-header {
+    padding: 8px 12px;
+    border: none;
+    cursor: pointer;
+    background: transparent;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: border-color 0.3s;
+}
+
+.select-header:hover {
+    border: none;
+}
+
+.select-header.active {
+    border: none;
+    box-shadow: none;
+}
+
+.options-wrapper {
+    position: absolute;
+    top: calc(100% + 5px);
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    max-height: 300px;
+    overflow-y: auto;
+    display: none;
+    z-index: 1500 !important;
+}
+
+.option-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.option-item:hover {
+    background: #f5f5f5;
+}
+
+.option-item.sort-option {
+    background: #f8f9fa;
+    border-bottom: 1px solid #eee;
+    font-weight: 500;
+}
+
+.search-box {
+    padding: 8px;
+    position: sticky;
+    top: 0;
+    background: white;
+    z-index: 1;
+    border-bottom: 1px solid #eee;
+}
+
+.search-box input {
+    width: 100%;
+    padding: 6px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+.custom-select .options-wrapper {
+    display: none;
+    position: absolute;
+    background: white;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    margin-top: 5px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    z-index: 100;
+}
+
+.custom-select.active .options-wrapper {
+    display: block;
+}
+
+
+
+.select-header.active svg {
+    transform: rotate(180deg);
+}
+
+
+
+.pagination {
+    margin-top: 20px;
+    text-align: center;
+}
+
+.pagination-button {
+    padding: 5px 10px;
+    margin: 0 5px;
+    cursor: pointer;
+    border: 1px solid #ccc;
+    background-color: #fff;
+    border-radius: 5px;
+}
+
+.pagination-button:hover {
+    background-color: #f1f1f1;
+}
+
+.pagination-info {
+    margin: 0 5px;
+    font-weight: bold;
+}
+
+
+
+
+.status-verified {
+    background-color: #d4edda; /* 浅绿色 */
+    color: #000; /* 文本颜色 */
+}
+
+.status-unverified {
+    background-color: #f8d7da; /* 浅红色 */
+    color: #000; /* 文本颜色 */
+}
+
+
+/* 搜索输入框样式 */
+.label-input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box; /* 使宽度包含内边距和边框 */
+    font-size: 14px;
+    color: #333;
+    margin-bottom: 4px; /* 与下拉列表间隔 */
+}
+
+/* 搜索结果展示区域样式 */
+#selectedId {
+    position: relative;
+    width: 100%;
+    border: 1px solid #ccc; /* 边框颜色 */
+    border-radius: 8px; /* 边框圆角 */
+    background-color: #ffffff !important; /* 强制应用这个样式 */
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); /* 阴影效果 */
+    margin-bottom: 10px; /* 与下方元素间隔 */
+    overflow: hidden; /* 隐藏超出部分 */
+    padding: 10px; /* 内边距 */
+    max-height: 300px; /* 最大高度 */
+    overflow-y: auto; /* 超出最大高度时显示滚动条 */
+
+}
+
+#selectedId ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border: 1px solid #ccc; /* 边框颜色 */
+    border-radius: 8px; /* 边框圆角 */
+    z-index: 1500;
+}
+
+#selectedId li {
+    padding: 10px;
+    cursor: pointer;
+    border-bottom: 1px solid #eee; /* 每个结果项之间的分隔线 */
+    display: flex;
+    align-items: center; /* 垂直居中对齐 */
+    justify-content: space-between; /* 水平两端对齐 */
+    transition: background-color 0.3s; /* 背景颜色变化的过渡动画 */
+}
+
+#selectedId li:last-child {
+    border-bottom: none;
+}
+
+#selectedId li:hover {
+    background-color: #f1f1f1; /* 鼠标悬停时的背景颜色 */
+}
+
+#selectedId ul li {
+    background-color: #ffffff !important;
+}
+
+.selectedId p {
+    background-color: inherit; /* 继承父元素的背景颜色 */
+    margin: 0; /* 移除外边距 */
+    padding: 0; /* 移除内边距 */
+}
+
+/*                       */
+/* hjx文本分类增加的css样式 */
+/*                       */
+
+.sort-buttons {
+    position: absolute;
+    left: 0;
+    top: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.sort-button {
+    margin: 2px 0;
+    padding: 0; /* 移除内边距 */
+    border: none; /* 移除边框 */
+    background: none; /* 移除背景色 */
+    cursor: pointer;
+    outline: none; /* 移除焦点时的边框 */
+}
+
+.sort-button:hover {
+    background-color: #f1f1f1;
+}
+
+.sort-button svg {
+    width: 10px;
+    height: 10px;
+}
+
+.sort-asc {
+    margin-top: 10px; /* 调整间距 */
+}
+
+.sort-desc {
+    margin-bottom: 4px; /* 调整间距 */
+}
+
+.text-content {
+    max-width: 200px; /* 设置最大宽度 */
+    white-space: nowrap; /* 禁止换行 */
+    overflow: hidden; /* 隐藏溢出内容 */
+    text-overflow: ellipsis; /* 使用省略号表示溢出内容 */
+    cursor: pointer; /* 鼠标悬停时显示为手型 */
+}

@@ -1,0 +1,31 @@
+{
+    "label_csv": "/home/smallb/models/img_classfication/data/custom/labels.csv",
+    "dataset_format": "csv",
+    "image_dir": "/home/smallb/models/img_classfication/data/custom/images",
+    "embedding_save_path": "embedding/",
+    "output_path": "output/",
+    "batch_size": 64,
+    "device": "cuda",
+    "cg3_k": 30,
+    "cg3_lr": 5e-4,
+    "cg3_epochs": 2000,
+    "cg3_threshold": 0.9,
+    "cg3_num_layers": 5,
+    "cg3_hidden_dim": 512,
+    "cg3_out_dim": 256,
+    "diffmap_k": 30,
+    "diffmap_sigma": 0.3,
+    "diffmap_components": 512,
+    "diffmap_epochs": 60,
+    "diffmap_lr": 0.003,
+    "llgc_alpha": 0.6,
+    "manifold_lambda": 0.2,
+    "manifold_lr": 0.003,
+    "manifold_epochs": 60,
+    "manifold_num_layers": 3,
+    "manifold_hidden_dims": [
+        512,
+        256,
+        128
+    ]
+}

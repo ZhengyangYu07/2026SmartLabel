@@ -1,0 +1,21 @@
+{% extends 'platform/components/base.html' %}
+
+{% block title %}
+    更多
+{% endblock %}
+
+{% block breadcrumb %}
+    <span>更多>>建议与反馈</span>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto p-6 bg-white rounded-2xl shadow">
+    <h2 class="text-2xl font-semibold text-purple-700 mb-4">意见与反馈</h2>
+    <form method="post" action="{% url 'submit_feedback' %}">
+        {% csrf_token %}
+        <label for="feedback" class="block text-lg text-gray-800 mb-2">请在下面输入您的意见或建议：</label>
+        <textarea id="feedback" name="feedback" rows="6" class="w-full p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring focus:ring-purple-300" placeholder="请输入您的反馈内容..."></textarea>
+        <button type="submit" class="mt-4 bg-purple-600 text-white px-6 py-2 rounded-xl hover:bg-purple-700 transition-all duration-200">提交反馈</button>
+    </form>
+</div>
+{% endblock %}

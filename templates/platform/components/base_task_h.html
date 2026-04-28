@@ -1,0 +1,676 @@
+{% extends 'platform/components/base.html' %} {% block title %}{{ task.name }} -
+{% block task_page_title %}任务详情{% endblock %}{% endblock %} {% block breadcrumb %}
+<span>
+  数据标注 >>
+  <a href="{% url 'manage_task' %}" class="text-blue-600 hover:underline"
+    >管理任务</a
+  >
+  >> 任务详情
+</span>
+{% endblock %} {% load static %} {% block css %}
+<link rel="stylesheet" href="{% static 'css/base_task_detail.css' %}" />
+{% block task_details %}{% endblock %} {% endblock %} {% block content %}
+<div
+  class="bg-gradient-to-b from-purple-900 to-blue-800 text-white shadow-lg rounded-lg mb-4"
+>
+  <div class="p-4 flex flex-col gap-3 text-sm">
+    <div class="flex items-center justify-between flex-wrap gap-4">
+      <div class="flex items-center flex-wrap gap-2">
+        <a
+          href="{% url 'manage_task' %}"
+          class="inline-flex items-center px-5 py-2 text-base font-medium rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+        >
+          ← 返回任务列表
+        </a>
+
+        <button
+          onclick="toggleFavorite('{{ task.id }}')"
+          class="inline-flex items-center px-5 py-2 text-base font-medium rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+          id="favorite-btn-{{ task.id }}"
+          title="{% if is_favorite %}取消收藏{% else %}收藏此任务{% endif %}"
+        >
+          ⭐
+          <span id="favorite-star-{{ task.id }}">
+            {% if is_favorite %}取消收藏{% else %}收藏{% endif %}
+          </span>
+        </button>
+
+        <a
+          href="{% url 'export_data' task.id %}"
+          class="inline-flex items-center px-5 py-2 text-base font-medium rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+        >
+          📁 导出数据
+        </a>
+      </div>
+
+      <div class="flex items-center flex-wrap gap-2">
+        <span class="text-xs uppercase tracking-[0.25em] text-white/60 mr-1"
+          >界面</span
+        >
+        <a
+          href="{% url 'task_detail' task.id %}"
+          class="inline-flex items-center px-4 py-2 rounded-full border border-white/30 transition-colors {% if task_view_mode|default:'labeled' == 'labeled' %}bg-white text-purple-900 font-semibold{% else %}bg-white/10 text-white hover:bg-white/20{% endif %}"
+        >
+          已标注
+        </a>
+        {% if task.task_type == 'image-classification' %}
+        <a
+          href="{% url 'unlabeled_detail' task.id %}"
+          class="inline-flex items-center px-4 py-2 rounded-full border border-white/30 transition-colors {% if task_view_mode == 'unlabeled' %}bg-white text-purple-900 font-semibold{% else %}bg-white/10 text-white hover:bg-white/20{% endif %}"
+        >
+          未标注
+        </a>
+        <a
+          href="{% url 'manual_annotation' task.id %}"
+          class="inline-flex items-center px-4 py-2 rounded-full border border-white/30 transition-colors {% if task_view_mode == 'manual' %}bg-white text-purple-900 font-semibold{% else %}bg-white/10 text-white hover:bg-white/20{% endif %}"
+        >
+          人工标注
+        </a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="w-full mb-6">
+  <div class="bg-gray-50 p-4 rounded-lg space-y-4">
+    <h2 class="text-xl font-bold mb-2">{{ task.name }}</h2>
+
+    <dl class="grid grid-cols-2 sm:grid-cols-4 gap-x-8 gap-y-4">
+      <div class="flex flex-col">
+        <dt class="text-gray-600">任务类型</dt>
+        <dd class="font-medium">{{ task.get_task_type_display }}</dd>
+      </div>
+      <div class="flex flex-col">
+        <dt class="text-gray-600">当前状态</dt>
+        <dd class="font-medium">
+          <span
+            id="task-current-status"
+            class="px-2 py-1 rounded {% if task.status == 'completed' %}bg-green-100 text-green-800 {% elif task.status == 'failed' %}bg-red-100 text-red-800 {% else %}bg-blue-100 text-blue-800{% endif %}"
+          >
+            {{ task.get_status_display }}
+          </span>
+        </dd>
+      </div>
+      <div class="flex flex-col">
+        <dt class="text-gray-600">创建时间</dt>
+        <dd class="font-medium">{{ task.created_at|date:"Y-m-d H:i" }}</dd>
+      </div>
+      <div class="flex flex-col">
+        <dt class="text-gray-600">处理进度</dt>
+        <dd class="flex items-center">
+          <div class="w-32 h-2 bg-gray-200 rounded-full mr-2">
+            <div
+              id="task-progress-bar"
+              class="h-2 rounded-full bg-blue-500"
+              style="width: {{ task.progress|default:0 }}%;"
+            ></div>
+          </div>
+          <span id="task-progress-percentage" class="text-sm"
+            >{{ task.progress|default:0 }}%</span
+          >
+        </dd>
+      </div>
+
+      <div class="flex flex-col">
+        <dt class="text-gray-600">未校验（已标注）</dt>
+        <dd id="unverified-count" class="font-medium text-orange-600">
+          {{ task.unverified_count|default:"0" }}
+        </dd>
+      </div>
+      <div class="flex flex-col">
+        <dt class="text-gray-600">已校验（已标注）</dt>
+        <dd id="verified-count" class="font-medium text-green-600">
+          {{ task.verified_count|default:"0" }}
+        </dd>
+      </div>
+      <div class="flex flex-col">
+        <dt class="text-gray-600">总计（已标注）</dt>
+        <dd id="total-verifiable-count" class="font-medium">
+          {{ task.total_verifiable_count|default:"0" }}
+        </dd>
+      </div>
+      <div class="flex flex-col">
+        <dt class="text-gray-600">校验进度</dt>
+        <dd class="flex items-center">
+          <div class="w-32 h-2 bg-gray-200 rounded-full mr-2">
+            <div
+              id="verification-progress-bar"
+              class="h-2 rounded-full bg-green-500"
+              style="width: {{ task.verification_progress|default:0 }}%;"
+            ></div>
+          </div>
+          <span id="verification-percentage" class="text-sm"
+            >{{ task.verification_progress|default:0 }}%</span
+          >
+        </dd>
+      </div>
+    </dl>
+  </div>
+</div>
+
+{% block task_table %}{% endblock %}
+
+<div
+  id="global-loading-indicator"
+  class="loading-overlay"
+  style="display: none; z-index: 500"
+>
+  <div class="loading-spinner"></div>
+</div>
+
+{% endblock %} {% block js %}
+<script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script
+  defer
+  src="https://unpkg.com/@alpinejs/collapse@3.x.x/dist/cdn.min.js"
+></script>
+
+<script>
+  // 用于存储任务进度轮询的定时器ID
+  const taskPollingIntervals = new Map();
+  const taskCompletionRedirectUrl =
+    "{{ task_completion_redirect_url|default:''|escapejs }}";
+  const initialTaskStatus = "{{ task.status|escapejs }}";
+
+  // 任务状态到CSS类的映射
+  const TASK_STATUS_CLASSES = {
+    completed: "bg-green-100 text-green-800",
+    failed: "bg-red-100 text-red-800",
+    pending: "bg-gray-100 text-gray-800",
+    processing: "bg-blue-100 text-blue-800",
+    checking: "bg-yellow-100 text-yellow-800",
+    default: "bg-gray-100 text-gray-800", // 默认状态
+  };
+
+  const TASK_STATUS_DISPLAY_NAMES = {
+    completed: "已完成",
+    failed: "失败",
+    pending: "等待中",
+    processing: "进行中",
+    checking: "校验中",
+    default: "未知",
+  };
+
+  // 实时更新处理进度的函数
+  async function startTaskDetailProgressPolling(taskId, initialStatus) {
+    // 先清除旧的定时器，以防万一
+    if (taskPollingIntervals.has(taskId)) {
+      clearInterval(taskPollingIntervals.get(taskId));
+      taskPollingIntervals.delete(taskId);
+    }
+
+    // 仅当任务处于进行中或等待中时才启动轮询
+    if (!["processing", "pending", "checking"].includes(initialStatus)) {
+      console.log(
+        `任务 ${taskId} 状态为 ${initialStatus}，不启动处理进度轮询。`,
+      );
+      return;
+    }
+
+    console.log(`启动任务 ${taskId} 处理进度轮询 (当前状态: ${initialStatus})`);
+
+    const progressBar = document.getElementById("task-progress-bar");
+    const percentageSpan = document.getElementById("task-progress-percentage");
+    const statusSpan = document.getElementById("task-current-status");
+
+    if (!progressBar || !percentageSpan || !statusSpan) {
+      console.error("任务详情页进度条或状态元素未找到，无法启动轮询。");
+      return;
+    }
+
+    let lastProgress = -1; // 用于避免不必要的DOM更新
+    let lastStatus = initialStatus;
+
+    const intervalId = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/tasks/${taskId}/progress/`);
+        if (!response.ok) {
+          if (response.status === 404) {
+            console.warn(`任务 ${taskId} 不存在，停止轮询。`);
+            clearInterval(intervalId);
+            taskPollingIntervals.delete(taskId);
+          } else {
+            console.error(`获取任务 ${taskId} 进度失败: ${response.status}`);
+          }
+          return;
+        }
+
+        const data = await response.json();
+        const newProgress = parseFloat(data.progress);
+        const newStatus = data.status;
+
+        // 检查进度是否发生显著变化
+        const progressChanged = Math.abs(newProgress - lastProgress) > 0.1;
+        // 检查状态是否发生变化
+        const statusChanged = newStatus !== lastStatus;
+
+        if (progressChanged) {
+          // 暂时移除过渡效果以防止抖动
+          progressBar.style.transition = "none";
+          progressBar.style.width = `${newProgress}%`;
+          percentageSpan.textContent = `${newProgress.toFixed(1)}%`; // 显示一位小数
+          // 强制浏览器重绘以应用无过渡的样式
+          void progressBar.offsetWidth;
+          // 恢复过渡效果
+          progressBar.style.transition = "width 0.3s ease-out";
+          lastProgress = newProgress;
+        }
+
+        if (statusChanged) {
+          // 更新状态文本和样式
+          statusSpan.textContent =
+            TASK_STATUS_DISPLAY_NAMES[newStatus] ||
+            TASK_STATUS_DISPLAY_NAMES["default"];
+          Object.values(TASK_STATUS_CLASSES).forEach((cls) =>
+            statusSpan.classList.remove(...cls.split(" ")),
+          );
+          const newClass =
+            TASK_STATUS_CLASSES[newStatus] || TASK_STATUS_CLASSES["default"];
+          statusSpan.classList.add(...newClass.split(" "));
+          lastStatus = newStatus;
+          console.log(`任务 ${taskId} 状态更新为: ${newStatus}`);
+
+          // 当状态由“进行中”等变为“已完成”时，刷新页面
+          if (newStatus === "completed") {
+            console.log(`任务 ${taskId} 已完成，将刷新页面。`);
+            clearInterval(intervalId);
+            taskPollingIntervals.delete(taskId);
+
+            showMessage(
+              taskCompletionRedirectUrl
+                ? "任务处理完成，正在进入人工标注界面..."
+                : "任务处理完成，正在刷新页面...",
+              "success",
+              2000,
+            );
+            setTimeout(() => {
+              if (taskCompletionRedirectUrl) {
+                location.href = taskCompletionRedirectUrl;
+              } else {
+                location.reload();
+              }
+            }, 1500); // 延迟刷新，让用户能看到提示
+
+            return; // 终止本次轮询，防止执行后续代码
+          }
+
+          // 如果任务失败，仅停止轮询，不刷新
+          if (newStatus === "failed") {
+            console.log(`任务 ${taskId} 已失败，停止处理进度轮询。`);
+            clearInterval(intervalId);
+            taskPollingIntervals.delete(taskId);
+            window.updateStats(); // 更新一次最终的统计（如有）
+            return; // 终止本次轮询
+          }
+        }
+
+        // 当处理进度达到100%时，刷新页面
+        if (newProgress >= 100 && lastStatus !== "completed") {
+          console.log(`任务 ${taskId} 进度已达100%，将刷新页面。`);
+          clearInterval(intervalId);
+          taskPollingIntervals.delete(taskId);
+
+          showMessage(
+            taskCompletionRedirectUrl
+              ? "任务处理完成，正在进入人工标注界面..."
+              : "任务处理完成，正在刷新页面...",
+            "success",
+            2000,
+          );
+          setTimeout(() => {
+            if (taskCompletionRedirectUrl) {
+              location.href = taskCompletionRedirectUrl;
+            } else {
+              location.reload();
+            }
+          }, 1500);
+
+          return; // 终止本次轮询
+        }
+
+        // 每次轮询，也更新一下校验进度条
+        window.updateStats();
+      } catch (error) {
+        console.error(`任务 ${taskId} 进度轮询请求失败:`, error);
+        // 即使请求失败，也继续轮询，除非是404或明确的停止信号
+      }
+    }, 3000); // 每3秒更新一次
+
+    taskPollingIntervals.set(taskId, intervalId);
+  }
+
+  // 更新保存的任务列表的显示
+  function updateSavedTasksList() {
+    const savedTasks = JSON.parse(localStorage.getItem("savedTasks")) || [];
+    const savedTasksListContainer = document.getElementById("savedTasksList");
+
+    if (!savedTasksListContainer) {
+      return;
+    }
+
+    savedTasksListContainer.innerHTML = "";
+
+    if (savedTasks.length === 0) {
+      const noTasksMessage = document.createElement("p");
+      noTasksMessage.className = "text-gray-500 text-sm py-1";
+      noTasksMessage.innerText = "暂无快捷入口";
+      savedTasksListContainer.appendChild(noTasksMessage);
+      return;
+    }
+
+    savedTasks.forEach((task) => {
+      const taskItem = document.createElement("a");
+      taskItem.className =
+        "block text-blue-500 hover:underline cursor-pointer py-1";
+      taskItem.innerText = `${task.name} (${task.type}) ${task.createdAt.split(" ")[0]}`;
+      taskItem.href = task.url; // href现在是纯净的URL，可以正常跳转
+      savedTasksListContainer.appendChild(taskItem);
+    });
+  }
+
+  // 更新收藏按钮显示
+  function updateFavoriteButton(isFavorite, taskId) {
+    const btn = document.getElementById(`favorite-btn-${taskId}`);
+    const star = document.getElementById(`favorite-star-{{ task.id }}`); // 使用当前任务的ID
+    if (!btn || !star) {
+      console.error("无法找到收藏按钮元素");
+      return;
+    }
+    if (isFavorite) {
+      btn.title = "取消收藏";
+      star.textContent = "取消收藏";
+    } else {
+      btn.title = "收藏此任务";
+      star.textContent = "收藏";
+    }
+  }
+
+  window.toggleFavorite = async function (taskId) {
+    try {
+      const response = await fetch(`/api/tasks/${taskId}/favorite/`, {
+        method: "POST",
+        headers: {
+          "X-CSRFToken": getCookie("csrftoken"),
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) throw new Error("请求失败");
+
+      const data = await response.json();
+      updateFavoriteButton(data.is_favorite, taskId);
+
+      // 根据操作显示对应的提示
+      showMessage(
+        data.is_favorite ? "已收藏任务" : "已取消收藏",
+        data.is_favorite ? "success" : "warning",
+      );
+
+      // 更新首页收藏列表
+      updateSavedTasksList();
+
+      // 发送全局消息通知其他页面
+      window.postMessage(
+        {
+          type: "favoriteChanged",
+          taskId: taskId,
+          isFavorite: data.is_favorite,
+        },
+        "*",
+      );
+
+      return data;
+    } catch (error) {
+      console.error("切换收藏状态失败:", error);
+      showMessage("操作失败，请重试", "error");
+      throw error;
+    }
+  };
+
+  // 添加消息监听器
+  window.addEventListener("message", (event) => {
+    if (event.data.type === "favoriteChanged") {
+      const { taskId, isFavorite } = event.data;
+      if (taskId === "{{ task.id|escapejs }}") {
+        // 确保与当前任务ID匹配
+        updateFavoriteButton(isFavorite, taskId);
+      }
+    }
+  });
+
+  // 通用的消息提示函数
+  function showMessage(message, type = "success", duration = 3000) {
+    // 延长显示时间
+    if (
+      typeof message === "string" &&
+      message.includes("Cannot read properties of null")
+    ) {
+      console.warn("忽略错误信息提示：", message);
+      return;
+    }
+    const messageDiv = document.createElement("div");
+    messageDiv.innerText = message;
+    // 使用 Tailwind 类进行样式控制，支持不同类型消息
+    // z-index设置为高于固定导航条，确保提示可见
+    // top-[base_header_height + operation_panel_height + some_margin]
+    messageDiv.className = `fixed top-[200px] left-1/2 -translate-x-1/2 px-5 py-3 rounded-md shadow-lg transition-opacity duration-300 ease-in-out z-5000 text-white bg-black border border-gray-600`;
+
+    if (type === "success") {
+      messageDiv.innerHTML = "✓ " + message;
+      messageDiv.style.backgroundColor = "#28a745"; // Green
+    } else if (type === "error") {
+      messageDiv.innerHTML = "✗ " + message;
+      messageDiv.style.backgroundColor = "#dc3545"; // Red
+    } else if (type === "warning") {
+      messageDiv.innerHTML = "⚠ " + message;
+      messageDiv.style.backgroundColor = "#ffc107"; // Yellow
+      messageDiv.style.color = "#333"; // Dark text for warning
+    } else {
+      // info
+      messageDiv.style.backgroundColor = "#3b82f6"; // Blue
+    }
+
+    document.body.appendChild(messageDiv);
+
+    // 自动消失
+    setTimeout(() => {
+      messageDiv.style.opacity = "0"; // 启动淡出动画
+      messageDiv.addEventListener(
+        "transitionend",
+        () => {
+          messageDiv.remove(); // 动画结束后移除元素
+        },
+        { once: true },
+      ); // 确保事件只触发一次
+    }, duration);
+  }
+
+  // 获取 CSRF token 的辅助函数
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== "") {
+      const cookies = document.cookie.split(";");
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === name + "=") {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  // 更新统计面板的函数（仅更新顶部概览统计，与子模板的职能分离）
+  window.updateStats = async function () {
+    try {
+      const response = await fetch(`/api/tasks/{{ task.id }}/stats/`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+
+      if (data.status === "success") {
+        const stats = data.stats;
+
+        // 更新已标注样本中的已校验、未校验、总计数量
+        document.getElementById("verified-count").textContent =
+          stats.verified_count;
+        document.getElementById("unverified-count").textContent =
+          stats.unverified_count;
+        document.getElementById("total-verifiable-count").textContent =
+          stats.total_count;
+
+        // 更新校验进度条和百分比
+        const verificationProgressBar = document.getElementById(
+          "verification-progress-bar",
+        );
+        const verificationPercentageSpan = document.getElementById(
+          "verification-percentage",
+        );
+        if (verificationProgressBar) {
+          verificationProgressBar.style.transition = "none"; // 暂时移除过渡
+          verificationProgressBar.style.width = `${stats.verification_progress}%`;
+          void verificationProgressBar.offsetWidth; // 强制重绘
+          verificationProgressBar.style.transition = "width 0.3s ease-out"; // 恢复过渡
+        }
+        if (verificationPercentageSpan)
+          verificationPercentageSpan.textContent = `${stats.verification_progress}%`;
+      } else {
+        showMessage(`获取统计数据失败: ${data.message}`, "error");
+      }
+    } catch (error) {
+      console.error("Error fetching task stats:", error);
+    }
+  };
+
+  // 批量更新 (校验所有 / 重置校验)
+  // 此函数取代了 base_task.html 中原有的 verifyAllSamples
+  window.performBulkVerification = async function (statusEN) {
+    // statusEN: 'verified' or 'unverified'
+    const confirmMessage =
+      statusEN === "verified"
+        ? "您确定要将所有符合当前筛选条件的模型预测项标记为“已校验”吗？此操作将影响所有页的数据，不包括人工标注项。"
+        : "您确定要将所有符合当前筛选条件的模型预测项重置为“未校验”吗？此操作将影响所有页的数据，不包括人工标注项。";
+
+    if (!confirm(confirmMessage)) return;
+
+    showGlobalLoading(); // 显示加载指示器
+
+    // 1. 创建请求体，用于发送筛选条件和目标状态
+    const bodyParams = new URLSearchParams();
+
+    // 2. 将要更新的目标状态'status_to_set'添加到请求体 (英文状态)
+    bodyParams.append("status_to_set", statusEN);
+
+    // 3. 从全局状态 activeFilters 中收集所有筛选条件 (这个 activeFilters 在子模板中定义)
+    // 这里需要确保 activeFilters 在全局作用域可用，或者通过其他方式获取
+    if (typeof activeFilters !== "undefined") {
+      Object.keys(activeFilters).forEach((type) => {
+        const values = Array.from(activeFilters[type]);
+        if (values.length > 0) {
+          // 对于 status 类型，前端存储的是中文，后端views.py/update_task_items 需要处理映射
+          // 这里统一encodeURIComponent以处理中文和特殊字符
+          bodyParams.append(type, values.map(encodeURIComponent).join(","));
+        }
+      });
+    } else {
+      console.warn("activeFilters 未定义，批量操作将不包含筛选条件。");
+    }
+
+    try {
+      const response = await fetch(`/tasks/{{ task.id }}/updateall/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-CSRFToken": getCookie("csrftoken"),
+        },
+        body: bodyParams.toString(), // 发送的是筛选条件，而不是item_ids
+      });
+
+      const data = await response.json();
+      if (data.status === "success") {
+        showMessage(
+          `批量操作成功！共更新了 ${data.updated_count || 0} 条记录。`,
+          "success",
+        );
+        // 调用子模板的 loadPage 来刷新表格数据
+        if (typeof loadPage === "function") {
+          loadPage(currentPage); // 刷新当前页
+        } else {
+          console.warn("loadPage 函数未定义，页面数据可能不会自动刷新。");
+        }
+        window.updateStats(); // 强制更新顶部的统计信息
+      } else {
+        showMessage(`批量操作失败: ${data.message}`, "error");
+      }
+    } catch (err) {
+      console.error("批量操作请求失败:", err);
+      showMessage(`请求失败: ${err.message}`, "error");
+    } finally {
+      hideGlobalLoading(); // 隐藏加载指示器
+    }
+  };
+
+  // 显示全局加载指示器
+  function showGlobalLoading() {
+    const loadingIndicator = document.getElementById(
+      "global-loading-indicator",
+    );
+    if (loadingIndicator) {
+      loadingIndicator.style.display = "flex";
+    }
+  }
+
+  // 隐藏全局加载指示器
+  function hideGlobalLoading() {
+    const loadingIndicator = document.getElementById(
+      "global-loading-indicator",
+    );
+    if (loadingIndicator) {
+      loadingIndicator.style.display = "none";
+    }
+  }
+
+  // 页面错误处理器，可以捕获一些非致命的DOM错误
+  window.addEventListener("error", function (event) {
+    const msg = event.message || "";
+    if (
+      msg.includes("Cannot read properties of null") ||
+      msg.includes("reading 'textContent'")
+    ) {
+      event.preventDefault(); // 阻止默认弹窗
+      console.warn("忽略非致命错误:", msg);
+      return false; // 阻止进一步冒泡
+    }
+    return true; // 其他错误照常处理
+  });
+
+  // DOM内容加载完毕后启动轮询
+  document.addEventListener("DOMContentLoaded", () => {
+    if (initialTaskStatus === "completed" && taskCompletionRedirectUrl) {
+      location.href = taskCompletionRedirectUrl;
+      return;
+    }
+
+    const taskId = "{{ task.id|escapejs }}"; // 从Django模板获取任务ID
+    const taskStatus = "{{ task.status|escapejs }}"; // 从Django模板获取任务当前状态
+
+    // 启动处理进度轮询
+    startTaskDetailProgressPolling(taskId, taskStatus);
+
+    // 初始化时也调用一次统计刷新，确保数据最新
+    window.updateStats();
+  });
+
+  // 页面卸载前清理所有定时器
+  window.addEventListener("beforeunload", () => {
+    taskPollingIntervals.forEach((intervalId, taskId) => {
+      clearInterval(intervalId);
+      console.log(`清理任务 ${taskId} 的进度轮询定时器。`);
+    });
+    taskPollingIntervals.clear();
+  });
+</script>
+{% endblock %}

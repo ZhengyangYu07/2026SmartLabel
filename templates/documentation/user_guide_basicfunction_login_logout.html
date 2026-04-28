@@ -1,0 +1,44 @@
+{%  extends 'platform/components/base_documents.html' %}
+{% load static %}
+
+{% block title %}
+    登录和登出
+{% endblock %}
+
+{% block breadcrumb %}
+    <span>基本操作>>登录和登出</span>
+{% endblock %}
+
+{% block content %}
+    <h2 class="text-3xl font-semibold text-purple-800">登录功能</h2>
+    <p class="text-lg text-gray-700 mt-4">本系统提供用户登录功能，允许已注册的用户通过输入用户名和密码进行登录。成功登录后，用户可以访问个人信息、管理自己的数据以及使用其他受限功能。</p>
+
+    <p class="text-lg text-gray-700 mt-4">以下是登录页面和注册页面：</p>
+    <div class="flex space-x-4 mt-4 overflow-x-auto">
+        <img src="{% static 'img/documents/login.png' %}" alt="登录页面.png" class="max-w-full h-auto border-2 border-gray-300 rounded-lg shadow-lg">
+        <img src="{% static 'img/documents/register.png' %}" alt="注册页面.png" class="max-w-full h-auto border-2 border-gray-300 rounded-lg shadow-lg">
+    </div>
+
+    <h3 class="text-2xl font-medium text-purple-700 mt-6">登录步骤</h3>
+    <ol class="list-decimal list-inside text-lg text-gray-700 mt-4 space-y-2">
+        <li>输入用户名和密码。</li>
+        <li>点击“立即登录”按钮。</li>
+        <li>如果用户名和密码正确，您将被成功登录到个人主页。</li>
+    </ol>
+
+    <h3 class="text-2xl font-medium text-purple-700 mt-6">注册步骤</h3>
+    <ol class="list-decimal list-inside text-lg text-gray-700 mt-4 space-y-2">
+        <li>输入用户名。</li>
+        <li>输入邮箱地址。</li>
+        <li>输入密码。</li>
+        <li>确认密码。</li>
+        <li>点击立即注册。</li>
+        <li>如果邮箱地址格式正确、密码符合要求且确认密码和密码一致，您将成功注册。</li>
+    </ol>
+
+    <h2 class="text-3xl font-semibold text-purple-800 mt-8">登出功能</h2>
+    <p class="text-lg text-gray-700 mt-4">用户可以通过点击登出按钮（如下图所示）安全地退出系统。</p>
+    <img src="{% static 'img/documents/logout.png' %}" alt="登出按钮.png" class="mt-4 max-w-full h-auto border-2 border-gray-300 rounded-lg shadow-lg">
+    <p class="text-lg text-gray-700 mt-4">登出后，您将返回到登录页面。</p>
+    <p class="text-lg text-gray-700 mt-4">请确保在公共设备上退出登录，以确保账户安全。</p>
+{% endblock %}

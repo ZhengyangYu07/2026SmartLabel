@@ -1,0 +1,35 @@
+{
+    "dataset_config": {
+        "image_path": "/home/smallb/models/ReTest/data/image3",
+        "csv_path": "/home/smallb/models/ReTest/data/result.csv",
+        "label_column": "label",
+        "image_path_column": "image_path",
+        "image_name_column": "image_name",
+        "output_path": "/home/smallb/models/ReTest/output/final_result.csv",
+        "batch_size": 64
+    },
+    "volminnet_config": {
+        "architecture": "resnet18",
+        "epoch": 100,
+        "batch_size": 64,
+        "lr": 0.0005,
+        "device": 0,
+        "weight_decay": 5e-4,
+        "lambda_vol": 0.01,
+        "seed": 42
+    },
+    "CWD_config": {
+        "architecture": "resnet18",
+        "epoch": 200,
+        "batch_size": 64,
+        "lr": 0.001,
+        "weight_decay": 0.0005,
+        "device": 0,
+        "cw_pinv_tau": 0.001,
+        "alpha_ce": 1.0,
+        "beta_li": 0.05,
+        "ld_lr_mul": 10.0,
+        "clip_grad": 1.0,
+        "use_amp": true
+    }
+}

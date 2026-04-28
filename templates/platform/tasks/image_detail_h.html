@@ -1,0 +1,294 @@
+{% extends "platform/components/base_task_h.html" %} {% load static %} {% block task_table %}
+<div
+  id="labeled-panel"
+  class="bg-white rounded-xl shadow-md border border-gray-100 p-5 space-y-4"
+>
+  <div class="flex items-center justify-between flex-wrap gap-3">
+    <div class="text-sm text-gray-600">每页 10 条，默认按最新进入在前</div>
+    <div class="flex items-center gap-2">
+      <label for="status-filter" class="text-sm text-gray-700">状态筛选</label>
+      <select
+        id="status-filter"
+        class="border border-gray-300 rounded px-2 py-1 text-sm"
+      >
+        <option value="all">全部</option>
+        <option value="已校验">已校验</option>
+        <option value="未校验">未校验</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm text-left">
+      <thead class="bg-gray-50 text-gray-700">
+        <tr>
+          <th class="px-4 py-3">ID</th>
+          <th class="px-4 py-3">图片</th>
+          <th class="px-4 py-3">标签</th>
+          <th class="px-4 py-3">状态</th>
+          <th class="px-4 py-3">操作</th>
+        </tr>
+      </thead>
+      <tbody id="labeled-table-body" class="divide-y divide-gray-100"></tbody>
+    </table>
+  </div>
+</div>
+
+<div
+  id="image-modal"
+  class="hidden fixed inset-0 z-[200] bg-black/80 items-center justify-center p-6"
+  onclick="closeModal(event)"
+>
+  <img
+    id="modal-image"
+    src=""
+    alt="预览"
+    class="max-w-[90vw] max-h-[90vh] object-contain rounded-lg"
+  />
+</div>
+{% endblock %} {% block js %} {{ block.super }}
+<script>
+  const taskId = "{{ task.id }}";
+  const pageSize = 10;
+  window.currentPage = 1;
+  window.totalPages = 1;
+  let activeStatus = "all";
+
+  function statusBadge(status) {
+    if (status === "已校验") {
+      return '<span class="px-2 py-1 rounded-full text-xs bg-green-100 text-green-700">已校验</span>';
+    }
+    return '<span class="px-2 py-1 rounded-full text-xs bg-yellow-100 text-yellow-700">未校验</span>';
+  }
+
+  function openModal(url) {
+    const modal = document.getElementById("image-modal");
+    const image = document.getElementById("modal-image");
+    image.src = url;
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
+  }
+
+  function closeModal(event) {
+    if (event.target.id !== "image-modal") {
+      return;
+    }
+    const modal = document.getElementById("image-modal");
+    modal.classList.add("hidden");
+    modal.classList.remove("flex");
+  }
+
+  async function fetchLabeledPage(page) {
+    const params = new URLSearchParams({
+      page: String(page),
+      page_size: String(pageSize),
+    });
+
+    if (activeStatus !== "all") {
+      params.set("status", activeStatus);
+    }
+
+    const resp = await fetch(`/tasks/${taskId}/data/?${params.toString()}`);
+    if (!resp.ok) {
+      throw new Error("加载已标注数据失败");
+    }
+    return await resp.json();
+  }
+
+  async function updateLabel(itemId, label) {
+    const body = new URLSearchParams({ item_id: String(itemId), label });
+    const resp = await fetch(`/tasks/${taskId}/update/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-CSRFToken": window.getCookie("csrftoken"),
+      },
+      body,
+    });
+    const data = await resp.json();
+    if (!resp.ok || data.status !== "success") {
+      throw new Error(data.message || "标签更新失败");
+    }
+  }
+
+  async function verifyItem(itemId) {
+    const body = new URLSearchParams({
+      item_id: String(itemId),
+      target_status: "已校验",
+    });
+    const resp = await fetch(`/tasks/${taskId}/verify/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-CSRFToken": window.getCookie("csrftoken"),
+      },
+      body,
+    });
+    const data = await resp.json();
+    if (!resp.ok || data.status !== "success") {
+      throw new Error(data.message || "通过操作失败");
+    }
+  }
+
+  function updatePagination(page, pages) {
+    window.currentPage = page;
+    window.totalPages = pages;
+
+    const currentPageSpan = document.getElementById("current-page");
+    const totalPagesSpan = document.getElementById("total-pages");
+    const prevPageBtn = document.getElementById("prev-page");
+    const nextPageBtn = document.getElementById("next-page");
+    const pageInput = document.getElementById("page-input");
+
+    if (currentPageSpan)
+      currentPageSpan.textContent = String(window.currentPage);
+    if (totalPagesSpan) totalPagesSpan.textContent = String(window.totalPages);
+    if (prevPageBtn) prevPageBtn.disabled = window.currentPage <= 1;
+    if (nextPageBtn)
+      nextPageBtn.disabled = window.currentPage >= window.totalPages;
+    if (pageInput) pageInput.value = String(window.currentPage);
+  }
+
+  function goToPage() {
+    const pageInput = document.getElementById("page-input");
+    if (!pageInput) return;
+    const targetPage = parseInt(pageInput.value, 10);
+    if (
+      Number.isNaN(targetPage) ||
+      targetPage < 1 ||
+      targetPage > window.totalPages
+    ) {
+      window.showMessage(`请输入有效页码(1-${window.totalPages})`, "warning");
+      return;
+    }
+    loadPage(targetPage);
+  }
+
+  function ensurePaginationControls() {
+    if (document.getElementById("pagination")) {
+      return;
+    }
+
+    const panel = document.getElementById("labeled-panel");
+    if (!panel) {
+      return;
+    }
+
+    const wrapper = document.createElement("div");
+    wrapper.id = "pagination";
+    wrapper.className = "mt-4 flex items-center justify-center gap-2 flex-wrap";
+    wrapper.innerHTML = `
+      <button id="prev-page" class="pagination-button" onclick="loadPage(window.currentPage - 1)" disabled>&lt; 上一页</button>
+      <span id="current-page">1</span>
+      <span>/</span>
+      <span id="total-pages">1</span>
+      <button id="next-page" class="pagination-button" onclick="loadPage(window.currentPage + 1)" disabled>下一页 &gt;</button>
+      <input type="number" id="page-input" placeholder="输入页码" min="1" class="border border-gray-300 rounded px-2 py-1 w-24 text-center" />
+      <button id="go-to-page" class="pagination-button" onclick="goToPage()">跳转</button>
+    `;
+
+    panel.appendChild(wrapper);
+  }
+
+  async function loadPage(page = 1) {
+    const tbody = document.getElementById("labeled-table-body");
+    tbody.innerHTML =
+      '<tr><td class="px-4 py-6 text-center text-gray-500" colspan="5">加载中...</td></tr>';
+
+    try {
+      const data = await fetchLabeledPage(page);
+      const items = data.results || [];
+      updatePagination(data.page || 1, data.total_pages || 1);
+
+      if (items.length === 0) {
+        tbody.innerHTML =
+          '<tr><td class="px-4 py-6 text-center text-gray-500" colspan="5">暂无已标注数据</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = items
+        .map((item) => {
+          const safeLabel = (item.label || "").replace(/"/g, "&quot;");
+          const imageUrl = item.relative_image_url || "";
+          const action =
+            item.status === "已校验"
+              ? '<span class="text-xs text-gray-400">已通过</span>'
+              : `<button class="pass-btn px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700" data-id="${item.id}">通过</button>`;
+
+          return `
+          <tr>
+            <td class="px-4 py-3">${item.sequence_number}</td>
+            <td class="px-4 py-3">
+              ${
+                imageUrl
+                  ? `<img src="${imageUrl}" alt="${item.image_name || "图片"}" class="w-14 h-14 object-cover rounded cursor-zoom-in" data-full="${imageUrl}" />`
+                  : '<span class="text-gray-400">无图片</span>'
+              }
+            </td>
+            <td class="px-4 py-3">
+              <input type="text" value="${safeLabel}" class="label-input w-full border border-gray-300 rounded px-2 py-1" data-id="${item.id}" />
+            </td>
+            <td class="px-4 py-3">${statusBadge(item.status)}</td>
+            <td class="px-4 py-3">${action}</td>
+          </tr>
+        `;
+        })
+        .join("");
+
+      document.querySelectorAll(".label-input").forEach((input) => {
+        input.addEventListener("keydown", async (event) => {
+          if (event.key !== "Enter") return;
+          const id = input.dataset.id;
+          const label = input.value.trim();
+          if (!label) {
+            window.showMessage("标签不能为空", "warning");
+            return;
+          }
+          try {
+            await updateLabel(id, label);
+            window.showMessage("标签已更新，状态已重置为未校验", "success");
+            await loadPage(window.currentPage);
+            window.updateStats();
+          } catch (error) {
+            window.showMessage(error.message, "error");
+          }
+        });
+      });
+
+      document.querySelectorAll(".pass-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          try {
+            await verifyItem(btn.dataset.id);
+            window.showMessage("已通过并标记为已校验", "success");
+            await loadPage(window.currentPage);
+            window.updateStats();
+          } catch (error) {
+            window.showMessage(error.message, "error");
+          }
+        });
+      });
+
+      document.querySelectorAll("img[data-full]").forEach((img) => {
+        img.addEventListener("click", () => openModal(img.dataset.full));
+      });
+    } catch (error) {
+      tbody.innerHTML = `<tr><td class="px-4 py-6 text-center text-red-500" colspan="5">${error.message}</td></tr>`;
+      updatePagination(1, 1);
+    }
+  }
+
+  window.loadPage = loadPage;
+  window.goToPage = goToPage;
+
+  document.addEventListener("DOMContentLoaded", () => {
+    ensurePaginationControls();
+    const statusFilter = document.getElementById("status-filter");
+    statusFilter.addEventListener("change", async () => {
+      activeStatus = statusFilter.value;
+      await loadPage(1);
+    });
+
+    loadPage(1);
+  });
+</script>
+{% endblock %}

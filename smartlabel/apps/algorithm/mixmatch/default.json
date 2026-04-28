@@ -1,0 +1,4 @@
+{
+    "dataset_path": "data",
+    "output_csv": "predictions.csv"
+  }

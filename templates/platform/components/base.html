@@ -1,0 +1,134 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartLabel - {% block title %}{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="{% static 'css/sidebar.css' %}">
+    <link rel="icon" href="{% static 'favicon.ico' %}" />
+    {% block css %}{% endblock %}
+</head>
+<body class="bg-gray-50">
+<div class="min-h-screen flex">
+    <!-- 侧边栏 -->
+    <aside class="sidebar-transition bg-gradient-to-b from-purple-900 to-blue-800
+                w-64 fixed h-screen flex flex-col" id="sidebar">
+        <!-- 品牌区 -->
+        <div class="p-4 border-b border-white/20">
+            <div class="flex items-center justify-between">
+                <h1 class="text-2xl font-bold text-amber-400 sidebar-brand">SmartLabel</h1>
+
+            </div>
+        </div>
+
+        <!-- 主菜单列表区 -->
+        <nav class="flex-1 p-2 space-y-1 overflow-y-auto">
+            <a href="{% url 'homepage' %}"
+               class="menu-item flex items-center p-3 text-gray-300 hover:bg-purple-700/20 rounded-lg">
+                <i class="fas fa-home w-6 text-center"></i>
+                <span class="sidebar-text ml-3">首页</span>
+            </a>
+            <a href="{% url 'create_task' %}"
+               class="menu-item flex items-center p-3 text-gray-300 hover:bg-purple-700/20 rounded-lg">
+                <i class="fas fa-plus w-6 text-center"></i>
+                <span class="sidebar-text ml-3">创建任务</span>
+            </a>
+            <a href="{% url 'manage_task' %}"
+               class="menu-item flex items-center p-3 text-gray-300 hover:bg-purple-700/20 rounded-lg">
+                <i class="fas fa-cog w-6 text-center"></i>
+                <span class="sidebar-text ml-3">管理任务</span>
+            </a>
+
+            <!-- 更多下拉菜单 -->
+            <div x-data="{ open: false }" class="relative">
+                <button @click="open = !open"
+                        class="w-full flex items-center p-3 text-gray-300 hover:bg-purple-700/20 rounded-lg">
+                    <i class="fas fa-ellipsis-h w-6 text-center"></i>
+                    <span class="sidebar-text ml-3">更多</span>
+                    <i :class="open ? 'fa-chevron-up' : 'fa-chevron-down'"
+                       class="fas text-sm submenu-arrow ml-auto"></i>
+                </button>
+
+                <div x-show="open" x-collapse
+                     class="ml-8 pl-2 space-y-1 border-l-2 border-purple-500/30">
+                    <a href="{% url 'feedback' %}"
+                       class="flex items-center p-2 text-sm text-gray-300 hover:bg-purple-700/20 rounded-lg">
+                        <span class="sidebar-text">建议与反馈</span>
+                    </a>
+                </div>
+            </div>
+        </nav>
+    </aside>
+
+    <!-- 主要内容区 -->
+    <main class="flex-1 ml-64" id="mainContent">
+        <!-- 顶部导航 -->
+        <header class="bg-white shadow-sm">
+            <div class="flex items-center justify-between px-6 py-4">
+                <!-- 面包屑 -->
+                <div class="text-gray-600">
+                    {% block breadcrumb %}
+                        <span>首页</span>
+                    {% endblock %}
+                </div>
+
+                <!-- 右侧功能区 -->
+                <div class="flex items-center space-x-4">
+                    <a href="{% url 'user_guide' %}" target="_blank"
+                       class="flex items-center text-gray-600 hover:text-purple-600">
+                        <i class="fas fa-book mr-2"></i>用户手册
+                    </a>
+
+                    <!-- 用户菜单 -->
+                    <div x-data="{ open: false }" class="relative">
+                        <button @click="open = !open"
+                                class="flex items-center space-x-2 group">
+                            <span class="text-gray-700">{{ request.user.username }}</span>
+                            <i class="fas fa-chevron-down text-sm text-gray-500
+                                    group-hover:text-purple-600 transition-colors"></i>
+                        </button>
+
+                        <!-- 下拉菜单 -->
+                        <div x-show="open" @click.away="open = false"
+                             x-transition:enter="dropdown-enter"
+                             x-transition:enter-start="dropdown-enter"
+                             x-transition:enter-end="dropdown-enter-active"
+                             class="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-xl
+                                    border border-gray-100 z-50">
+                            <a href="{% url 'profile' %}"
+                               class="block px-4 py-3 text-gray-700 hover:bg-gray-50">
+                                <i class="fas fa-user-circle mr-2"></i>个人信息
+                            </a>
+                            <a href="{% url 'change_password' %}"
+                               class="block px-4 py-3 text-gray-700 hover:bg-gray-50">
+                                <i class="fas fa-lock mr-2"></i>修改密码
+                            </a>
+                            <hr class="border-gray-100">
+                            <a href="{% url 'welcome' %}"
+                               class="block px-4 py-3 text-red-500 hover:bg-red-50">
+                                <i class="fas fa-sign-out-alt mr-2"></i>退出登录
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- 内容容器 -->
+        <div class="p-6">
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+</div>
+
+<!-- Alpine.js -->
+<script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+{% block js %}{% endblock %}
+
+</body>
+</html>

@@ -1,0 +1,10 @@
+
+<!-- 分页模块 -->
+ <div id="pagination" style="margin-top: 20px; text-align: center;">
+        <button id="prev-page" class="pagination-button" onclick="loadPage(currentPage - 1)" disabled>&lt; 上一页</button>
+        <span id="current-page">1</span> / <span id="total-pages">1</span>
+        <button id="next-page" class="pagination-button" onclick="loadPage(currentPage + 1)" disabled>下一页 &gt;</button>
+     <input type="number" id="page-input" placeholder="输入页码" min="1" style="margin: 0 1px 0; width: 80px; text-align: center;overflow: visible" />
+    <button id="go-to-page" class="pagination-button" onclick="goToPage()">跳转</button>
+    </div>
+

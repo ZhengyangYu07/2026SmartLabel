@@ -1,0 +1,371 @@
+{% extends 'platform/components/base.html' %}
+
+{% block title %}
+首页
+{% endblock %}
+
+{% block breadcrumb %}
+<span>首页</span>
+{% endblock %}
+
+{% block content %}
+<div class="flex flex-col lg:flex-row gap-6">
+    <!-- 左侧区域 -->
+    <div class="flex-grow flex flex-col md:flex-row gap-4">
+        <!-- 标注任务总览 -->
+        <div class="w-full md:w-1/2">
+            <div class="bg-white rounded-2xl shadow p-6 h-full">
+                <h2 class="text-xl font-semibold text-gray-800 mb-4">标注任务总览</h2>
+
+                <!-- 正在进行任务 -->
+                <div class="bg-blue-100 p-4 rounded-xl shadow-inner mb-4 flex justify-between items-center">
+                    <!-- 左侧：标题和描述 -->
+                    <div>
+                        <h3 class="text-lg font-bold text-blue-700">进行中</h3>
+                        <!-- 2. 文案优化 -->
+                        <p class="text-sm text-blue-600">当前正在进行的标注任务数</p>
+                    </div>
+                    <!-- 右侧：任务数量 -->
+                    <p id="in-progress-count" class="text-4xl font-semibold text-blue-900">
+                        {{ in_progress_count }}
+                    </p>
+                </div>
+
+                <!-- 已完成任务 -->
+                <div class="bg-green-100 p-4 rounded-xl shadow-inner flex justify-between items-center">
+                    <!-- 左侧：标题和描述 -->
+                    <div>
+                        <h3 class="text-lg font-bold text-green-700">已完成</h3>
+                        <!-- 2. 文案优化 -->
+                        <p class="text-sm text-green-600">已完成的标注任务数</p>
+                    </div>
+                    <!-- 右侧：任务数量 -->
+                    <p id="completed-count" class="text-4xl font-semibold text-green-900">
+                        {{ completed_count }}
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div class="w-full md:w-1/2 bg-white rounded-2xl shadow p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-semibold text-gray-700">收藏任务</h2>
+                <button onclick="updateSavedTasksList()" class="text-blue-500 hover:text-blue-700 text-sm">
+                    刷新
+                </button>
+            </div>
+            <div id="savedTasksList" class="mt-4 space-y-2 max-h-60 overflow-y-auto pr-2"></div>
+        </div>
+    </div>
+
+    <!-- 右侧更新日志 -->
+    <div x-data="logPagination()" class="w-full lg:w-1/4 bg-white rounded-2xl shadow p-6">
+        <h2 class="text-xl font-semibold text-purple-700 mb-4">更新日志</h2>
+
+        <!-- 日志列表 -->
+        <ul class="space-y-3 text-sm text-gray-700">
+            <template x-for="entry in paginatedLogs" :key="entry.date">
+                <li>
+                    <span class="font-medium text-purple-600" x-text="entry.date + '：'"></span>
+                    <span x-text="entry.content"></span>
+                </li>
+            </template>
+        </ul>
+
+        <!-- 分页按钮 -->
+        <div class="mt-4 flex justify-between items-center text-sm text-gray-600">
+            <button class="px-3 py-1 bg-gray-100 rounded hover:bg-gray-200" @click="prevPage"
+                :disabled="currentPage === 1">上一页</button>
+            <span>第 <span x-text="currentPage"></span> 页，共 <span x-text="totalPages"></span> 页</span>
+            <button class="px-3 py-1 bg-gray-100 rounded hover:bg-gray-200" @click="nextPage"
+                :disabled="currentPage === totalPages">下一页</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block js %}
+<script>
+    // 更新日志数据
+    function logPagination() {
+        return {
+            logs: [
+                { date: '2025-07-20', content: '优化展示界面，支持半监督模式下的文本分类任务。' },
+                { date: '2025-06-03', content: '支持半监督模式下的图像分类任务。' },
+                { date: '2025-05-13', content: '添加文本分类展示界面。' },
+                { date: '2025-04-22', content: '添加反馈功能模块。' },
+                { date: '2025-04-20', content: '完善多模态处理页面。' },
+                { date: '2025-04-15', content: '修复登录状态同步问题。' },
+                // 你可以继续添加更多日志
+            ],
+            perPage: 5,
+            currentPage: 1,
+
+            get totalPages() {
+                return Math.ceil(this.logs.length / this.perPage);
+            },
+
+            get paginatedLogs() {
+                const start = (this.currentPage - 1) * this.perPage;
+                return this.logs.slice(start, start + this.perPage);
+            },
+
+            nextPage() {
+                if (this.currentPage < this.totalPages) this.currentPage++;
+            },
+
+            prevPage() {
+                if (this.currentPage > 1) this.currentPage--;
+            },
+        };
+    }
+
+    // 获取 CSRF token 的函数
+    function getCSRFToken() {
+        const cookieValue = document.cookie
+            .split('; ')
+            .find(row => row.startsWith('csrftoken='))
+            ?.split('=')[1];
+        return cookieValue || '';
+    }
+
+    // 更新收藏任务列表
+    async function updateSavedTasksList() {
+        const savedTasksListContainer = document.getElementById('savedTasksList');
+        if (!savedTasksListContainer) return;
+
+        savedTasksListContainer.innerHTML = '<div class="text-center py-2">加载中...</div>';
+
+        try {
+            const response = await fetch("/api/favorites/", {
+                headers: {
+                    'X-CSRFToken': getCSRFToken()
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            console.log('收藏列表数据:', data);
+
+            savedTasksListContainer.innerHTML = '';
+
+            // 添加数据检查
+            if (!data || !data.favorites || !Array.isArray(data.favorites)) {
+                throw new Error('无效的响应格式');
+            }
+
+            const favorites = data.favorites || []; // 确保favorites总是数组
+            savedTasksListContainer.innerHTML = '';
+
+            if (data.favorites.length === 0) {
+                const noTasksMessage = document.createElement('p');
+                noTasksMessage.className = 'text-gray-500 text-sm py-1';
+                noTasksMessage.innerText = '您可以在任务详情页点击五角星图标来收藏任务。';
+                savedTasksListContainer.appendChild(noTasksMessage);
+                return;
+            }
+
+            // 安全遍历数据
+            favorites.forEach(task => {
+                if (!task || !task.id) return; // 跳过无效任务项
+
+                const taskItem = document.createElement('div');
+                taskItem.className = 'flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg transition-colors';
+
+                const link = document.createElement('a');
+                link.href = `/tasks/${task.id}/detail/`;
+                link.className = 'flex-grow';
+                link.innerHTML = `
+                <div class="font-medium text-blue-600 hover:underline">${task.name || '未命名任务'}</div>
+                <div class="text-xs text-gray-500 mt-1">
+                    ${task.type || '未知类型'} | 收藏于 ${task.favorited_at || '未知时间'}
+                </div>
+            `;
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.innerHTML = '❌';
+                deleteBtn.title = '取消收藏';
+                deleteBtn.className = 'ml-2 text-gray-400 hover:text-red-500 transition-colors';
+                deleteBtn.onclick = (e) => {
+                    e.preventDefault();
+                    deleteSavedTask(task.id);
+                };
+
+                taskItem.appendChild(link);
+                taskItem.appendChild(deleteBtn);
+                savedTasksListContainer.appendChild(taskItem);
+            });
+
+        } catch (error) {
+            console.error('加载收藏列表失败:', error);
+            savedTasksListContainer.innerHTML = `
+            <div class="text-red-500 text-sm py-2 text-center">
+                加载失败: ${error.message}<br>
+                <button onclick="updateSavedTasksList()"
+                        class="mt-1 text-blue-500 hover:underline">
+                    点击重试
+                </button>
+            </div>
+        `;
+        }
+    }
+
+    // 监听收藏状态变化 - 增强版
+    window.addEventListener('message', function (event) {
+        if (event.data.type === 'favoriteChanged') {
+            console.log('首页收到收藏状态变化:', event.data);
+            // 延迟更新，确保数据库操作完成
+            setTimeout(() => {
+                updateSavedTasksList();
+            }, 500);
+        }
+    });
+
+    // 页面获得焦点时也更新收藏列表（从其他标签页返回时）
+    window.addEventListener('focus', function () {
+        updateSavedTasksList();
+    });
+
+    // 页面可见性变化时更新收藏列表
+    document.addEventListener('visibilitychange', function () {
+        if (!document.hidden) {
+            setTimeout(() => {
+                updateSavedTasksList();
+            }, 300);
+        }
+    });
+
+    // 更新首页统计数据
+    async function updateHomepageStats() {
+        try {
+            const response = await fetch("{% url 'api_homepage_stats' %}");
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                document.getElementById('in-progress-count').textContent = data.in_progress_count;
+                document.getElementById('completed-count').textContent = data.completed_count;
+            }
+        } catch (error) {
+            console.error('获取首页统计数据失败:', error);
+        }
+    }
+
+    // 删除收藏任务
+    async function deleteSavedTask(taskId) {
+        if (!confirm('确定要取消收藏此任务吗？')) return;
+
+        try {
+            const response = await fetch(`/api/tasks/${taskId}/favorite/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCSRFToken(),
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            // 检查返回的数据格式，兼容不同的响应格式
+            const isFavoriteRemoved = data.is_favorite === false || data.isFavorite === false;
+
+            if (isFavoriteRemoved) {
+                showMessage(data.message || '已取消收藏', 'info');
+
+                // 立即更新收藏列表
+                await updateSavedTasksList();
+
+                // 通知其他页面同步状态
+                window.postMessage({
+                    type: 'favoriteChanged',
+                    taskId: taskId,
+                    isFavorite: false
+                }, '*');
+            } else {
+                showMessage('操作异常，请刷新页面重试', 'warning');
+            }
+        } catch (error) {
+            console.error('取消收藏失败:', error);
+            showMessage('取消收藏失败，请重试', 'error');
+        }
+    }
+
+    // 消息提示函数
+    function showMessage(message, type = 'success', duration = 1500) {
+        // 防止显示包含错误信息的消息
+        if (typeof message === 'string' && message.includes("Cannot read properties of null")) {
+            console.warn("忽略错误信息提示：", message);
+            return;
+        }
+        const messageDiv = document.createElement('div');
+        messageDiv.innerText = message;
+        messageDiv.className = `fixed top-20 left-1/2 -translate-x-1/2 px-5 py-3 rounded-md text-white shadow-lg transition-opacity duration-300 ease-in-out z-5000`;
+
+        // 根据消息类型设置样式和图标
+        if (type === 'success') {
+            messageDiv.classList.add('bg-green-500');
+            messageDiv.innerHTML = '✓ ' + message;
+        } else if (type === 'error') {
+            messageDiv.classList.add('bg-red-500');
+            messageDiv.innerHTML = '✗ ' + message;
+        } else if (type === 'warning') {
+            messageDiv.classList.add('bg-orange-500');
+            messageDiv.innerHTML = '⚠ ' + message;
+        } else if (type === 'info') {
+            messageDiv.classList.add('bg-blue-500');
+            messageDiv.innerHTML = 'ℹ ' + message;
+        } else {
+            messageDiv.classList.add('bg-gray-500');
+        }
+
+        document.body.appendChild(messageDiv);
+
+        setTimeout(() => {
+            messageDiv.style.opacity = '0';
+            messageDiv.addEventListener('transitionend', () => {
+                if (messageDiv.parentNode) {
+                    messageDiv.remove();
+                }
+            }, { once: true });
+        }, duration);
+    }
+
+    // 页面加载时初始化
+    document.addEventListener('DOMContentLoaded', function () {
+        console.log('首页DOM加载完成，开始初始化...');
+        // 初始化数据加载
+        updateHomepageStats();
+        updateSavedTasksList();
+
+        // 设置定时更新统计数据（每30秒）
+        setInterval(updateHomepageStats, 30000);
+
+        // 设置定时更新收藏列表（每2分钟）
+        setInterval(updateSavedTasksList, 120000);
+
+        console.log('首页初始化完成');
+    });
+
+    // 全局错误处理，防止非致命错误弹窗
+    window.addEventListener('error', function (event) {
+        const msg = event.message || '';
+        if (msg.includes("Cannot read properties of null") ||
+            msg.includes("reading 'textContent'") ||
+            msg.includes("reading 'innerHTML'")) {
+            event.preventDefault(); // 阻止默认弹窗
+            console.warn("忽略非致命错误:", msg);
+            return false; // 阻止进一步冒泡
+        }
+        return true; // 其他错误照常处理
+    });
+
+    // 导出函数供其他脚本使用
+    window.updateSavedTasksList = updateSavedTasksList;
+    window.showMessage = showMessage;
+</script>
+{% endblock %}

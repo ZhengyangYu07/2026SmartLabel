@@ -1,0 +1,513 @@
+/* 设置表格宽度为固定大小 */
+table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+}
+
+table th {
+    border: 1px solid #ccc;
+    padding: 0 !important; 
+    text-align: center;
+    position: relative;
+    box-sizing: border-box;
+    background-color: #f2f2f2;
+    white-space: normal; /* 允许th内的文本在极端情况下换行 */
+}
+
+table th .custom-select {
+    display: flex;
+    align-items: center;  /* 垂直居中 */
+    justify-content: center;  /* 水平居中：让 select-header 整体在 th 内部居中 */
+    width: 100%;  /* 占据 th 的内容区域宽度 */
+    height: 100%;  /* 占据 th 高度 */
+    position: relative; /* <--- 确保此元素是定位上下文，因为 options-wrapper 绝对定位 */
+    box-sizing: border-box;
+    /* 增加一个内部 padding，给 select-header 预留空间，避免紧贴边框 */
+    padding: 2px; /* 给 custom-select 自身增加一点内部 padding */
+}
+
+table th .custom-select .select-header {
+    display: flex;
+    align-items: center;
+    justify-content: center; /* 让 t-span 和 t-svg 整体在 select-header 内部居中 */
+    width: 100%; /* select-header 填充其父级 custom-select 的宽度 */
+    height: 100%;
+    padding: 5px; /* <--- 统一 padding，四边都为 5px，比之前 8px 5px 稍减小，更紧凑 */
+    box-sizing: border-box; /* 确保 padding 包含在 width/height 内 */
+    cursor: pointer;
+    gap: 1px; /* <--- 进一步减小文本和图标的间距，使其更贴近 */
+    min-width: 0; /* 允许 flex item 自身收缩 */
+    flex-shrink: 1; /* 允许 select-header 在必要时收缩 */
+}
+
+table th .custom-select .select-header .t-span {
+    white-space: nowrap; /* 文本不换行 */
+    overflow: hidden; /* 隐藏超出部分 */
+    text-overflow: ellipsis; /* 显示省略号 */
+    min-width: 0; /* 允许 flex 元素在必要时收缩到最小内容宽度 */
+    flex-shrink: 1; /* <--- 关键：允许文本在空间不足时收缩 */
+}
+
+table th .custom-select .select-header .t-svg {
+    transition: transform 0.3s;
+    flex-shrink: 0;  /* 确保图标不会被压缩 */
+    margin-left: 0; /* 移除可能的默认外边距 */
+    /* 确保SVG大小固定，不随内容变化 */
+    width: 12px;
+    height: 12px;
+}
+
+table th .custom-select .options-wrapper { /* 提高特异性以确保覆盖 */
+    position: absolute; /* 保持绝对定位 */
+    top: calc(100% + 5px); /* 保持与表头的距离 */
+    /* width: auto; /* 移除 left:0; right:0; 让宽度由内容或min-width决定 */
+    left: 50%; /* 关键：从中间开始定位 */
+    transform: translateX(-50%); /* 关键：向左平移自身宽度的一半，实现居中 */
+
+    /* 调整宽度策略 */
+    min-width: 180px; /* <--- 最小宽度，确保在窄列也能足够宽 */
+    width: 120%; /* <--- 相对于父元素（.custom-select）的宽度，使其略宽 */
+    /* max-width: 300px; /* <--- 也可以设置最大宽度，防止过宽，根据实际内容调整 */
+
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    max-height: 300px;
+    overflow-y: auto;
+    display: none;
+    z-index: 1500 !important; /* 确保层级最高 */
+}
+
+/* 其他保持不变的样式 */
+td {
+    border: 1px solid #ccc;
+    padding: 8px;
+    text-align: center;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+/* Modal styles (unchanged) */
+.modal {
+    display: flex;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(255, 255, 255, 0.7);
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-content {
+    max-width: 50%;
+    max-height: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    background-color: white !important;
+    padding: 20px !important;
+    border-radius: 8px !important;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2) !important;
+    overflow: auto !important;
+}
+
+.close {
+    position: absolute;
+    top: 0;
+    right: 0;
+    background: white;
+    color: black;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    text-align: center;
+    line-height: 30px;
+    font-size: 24px;
+    font-weight: bold;
+    cursor: pointer;
+    box-shadow: 0 0 5px rgba(0, 0, 0, 0.3);
+}
+
+.close:hover {
+    background: #f1f1f1;
+}
+
+.close:hover,
+.close:focus {
+    color: black;
+    text-decoration: none;
+}
+
+
+/* 设置每个列的宽度 */
+th:nth-child(1),
+td:nth-child(1) {
+    width: 50px;
+}
+
+th:nth-child(2),
+td:nth-child(2) {
+    width: 350px;
+}
+
+.text-content {
+    cursor: pointer;
+    text-align: left;
+    padding-left: 10px;
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+th:nth-child(3),
+td:nth-child(3) {
+    width: 220px;
+    overflow: visible; /* 保持可见以允许编辑框弹出 */
+}
+
+/* 确保 label-input 和 save-button 在编辑模式下能够正确布局和宽度 */
+.relative.block {
+    position: relative;
+    width: 100%;
+    display: flex; /* 让 span, input, button 在一行 */
+    align-items: center;
+    justify-content: center; /* 默认居中显示 */
+    box-sizing: border-box;
+    padding: 2px; /* 给这个容器也加一点padding，避免内容太贴边 */
+}
+
+/* 针对 label-display 的样式，确保其在非编辑状态下也能撑开空间并居中 */
+span[id^="label-display-"] { /* 使用属性选择器匹配动态ID */
+    display: block; /* 确保它独占一行或能控制宽度 */
+    width: 100%; /* 撑开可用宽度 */
+    padding: 2px 0;
+    text-align: center;
+    cursor: pointer;
+    box-sizing: border-box;
+    white-space: nowrap; /* 文本不换行 */
+    overflow: hidden; /* 隐藏溢出文本 */
+    text-overflow: ellipsis; /* 显示省略号 */
+}
+
+
+/* 针对 label-input 的样式，确保其在编辑模式下宽度合适 */
+input[id^="label-input-"] { /* 使用属性选择器匹配动态ID */
+    flex-grow: 1; /* 允许输入框填充可用空间 */
+    padding: 4px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+    min-width: 80px; /* 最小宽度，防止过小 */
+    max-width: 100%; /* 限制最大宽度不超过父容器 */
+}
+
+/* 针对 save-button 的样式 */
+button[id^="save-button-"] { /* 使用属性选择器匹配动态ID */
+    flex-shrink: 0; /* 防止按钮被压缩 */
+    margin-left: 5px;
+    padding: 4px 8px;
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+
+th:nth-child(4),
+td:nth-child(4) {
+    width: 100px; /* 置信度列的宽度 */
+}
+
+th:nth-child(5),
+td:nth-child(5) {
+    width: 100px; /* 状态列的宽度 */
+}
+
+th:nth-child(6),
+td:nth-child(6) {
+    width: 150px;
+    white-space: nowrap;
+    padding: 0 5px; /* 调整操作列的内边距，减少其对按钮的影响 */
+}
+/* 确保操作列的按钮也能合理布局 */
+td:nth-child(6) button {
+    margin: 2px; /* 减小按钮间的间距 */
+    padding: 4px 8px; /* 减小按钮的内边距 */
+    font-size: 0.8em; /* 减小字体大小，使其更紧凑 */
+}
+
+
+.option-item {
+    height: 30px;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    padding: 5px 10px;
+}
+
+.select-header.filter-active {
+    color: #3b82f6;
+    font-weight: bold;
+    border-bottom: 2px solid #3b82f6;
+}
+
+.option-item.sort-option {
+    font-weight: bold;
+    background-color: #f0f0f0;
+    cursor: pointer;
+}
+
+.option-item.sort-option:hover {
+    background-color: #e0e0e0;
+}
+
+.option-item.reset-filter-option {
+    font-weight: bold;
+    color: #dc3545;
+    background-color: #ffe0e0;
+    cursor: pointer;
+    margin-top: 5px;
+    border-top: 1px solid #ddd;
+    padding-top: 10px;
+}
+
+.option-item.reset-filter-option:hover {
+    background-color: #ffc0c0;
+}
+
+/* Modal and Loading styles (unchanged, ensuring consistency) */
+.modal {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, .7);
+    z-index: 9999;
+}
+
+.modal-content {
+    width: 320px;
+    padding: 28px 32px 24px;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .15);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+}
+
+.modal-content h3 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    color: #222;
+}
+
+.modal-content p {
+    margin: 0;
+    font-size: 14px;
+    color: #555;
+}
+
+.modal-content .loading {
+    display: none;
+    margin-bottom: 10px;
+}
+
+.modal-content .loading.active {
+    display: inline-block;
+}
+
+.modal-content .loading.active+button {
+    pointer-events: none;
+    opacity: 0.5;
+}
+
+.modal-content .loading-spinner {
+    border: 5px solid #f3f3f3;
+    border-top: 5px solid #3b82f6;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+.modal-content button {
+    width: 96px;
+    height: 36px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all .2s;
+}
+
+#confirm-btn {
+    background: #1677ff;
+    color: #fff;
+}
+
+#confirm-btn:disabled {
+    background: #b3d0ff;
+    color: #fff;
+    cursor: not-allowed;
+}
+
+#cancel-btn {
+    background: #f2f2f2;
+    color: #333;
+}
+
+#cancel-btn:hover {
+    background: #e6e6e6;
+}
+
+.operation-panel button {
+    margin: 5px;
+    padding: 10px 15px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.operation-panel button#denoise-btn {
+    background-color: #3b82f6;
+    color: white;
+}
+
+.status-verified {
+    background-color: #d4edda !important;
+    color: #155724 !important;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-weight: 500;
+    border: 1px solid #c3e6cb;
+}
+
+.status-unverified {
+    background-color: #fff3cd !important;
+    color: #856404 !important;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-weight: 500;
+    border: 1px solid #ffeaa7;
+}
+
+.status-manual {
+    background-color: #e2e3f1 !important;
+    color: #6f42c1 !important;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-weight: 500;
+    border: 1px solid #c5c6d8;
+}
+
+td[data-status] {
+    text-align: center;
+    vertical-align: middle;
+}
+
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(255, 255, 255, 0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+}
+
+.loading-spinner {
+    border: 8px solid #f3f3f3;
+    border-top: 8px solid #3b82f6;
+    border-radius: 50%;
+    width: 60px;
+    height: 60px;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+ul.selectedId {
+    position: absolute;
+    background-color: white;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    white-space: nowrap;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 100;
+    text-align: left;
+    border: 1px solid #ccc;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    top: 100%;
+    left: 0;
+    /* 让建议列表的宽度和输入框保持一致，或自动根据内容调整 */
+    width: 100%;
+    /* max-width: 100%; */ /* 移除，让它根据内容自动伸展 */
+    box-sizing: border-box;
+}
+
+ul.selectedId li {
+    padding: 8px 10px;
+    cursor: pointer;
+}
+
+ul.selectedId li:hover {
+    background-color: #f0f0f0;
+}
+
+.overflow-x-auto {
+    min-height: 300px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: center;
+}
+
+table tbody tr td[colspan] {
+    white-space: normal;
+    padding: 20px;
+}
+
+.screen-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0);
+    z-index: 90;
+    pointer-events: none;
+    display: none;
+}
+

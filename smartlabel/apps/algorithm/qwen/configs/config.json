@@ -1,0 +1,18 @@
+{
+    "image_path": "/home/smallb/models/Qwen/image.png",
+    "task_description": "你是一个图像分类专家，只需要对输入图像做出分类判断。请在我提供的类别中选择一个最合适的标签，并估算其置信度（百分比）。输出格式必须为：标签名 空格 置信度（如“狗 98%”）。不要输出描述、关键词或其他内容。",
+    "label_choices": [
+        "桃花",
+        "菊花",
+        "梅花",
+        "桂花",
+        "荷花"
+    ],
+    "restrict_labels": true,
+    "generation_params": {
+        "do_sample": true,
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "max_new_tokens": 512
+    }
+}

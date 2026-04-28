@@ -1,0 +1,55 @@
+{%  extends 'platform/components/base_documents.html' %}
+{% load static %}
+
+{% block title %}
+    修改信息
+{% endblock %}
+
+{% block breadcrumb %}
+    <span>基本操作>>修改信息</span>
+{% endblock %}
+
+{% block content %}
+    <h2 class="text-3xl font-semibold text-purple-800">修改个人信息功能</h2>
+    <p class="text-lg text-gray-700 mt-4">本功能允许您更新个人账号的信息。您可以修改您的用户名、电子邮件等信息，以确保个人账号的准确性和安全性。</p>
+
+    <h3 class="text-2xl font-medium text-purple-700 mt-6">修改信息步骤</h3>
+    <ol class="list-decimal list-inside text-lg text-gray-700 mt-4 space-y-2">
+        <li>登录到您的账号。</li>
+        <li>进入“个人信息”页面。</li>
+        <li>在页面中选择您要修改的信息（如用户名、邮箱等）。</li>
+        <li>点击“保存修改”按钮。</li>
+        <li>系统会提示您成功保存修改，新的信息将生效。</li>
+    </ol>
+
+    <h3 class="text-2xl font-medium text-purple-700 mt-6">修改信息示例</h3>
+    <p class="text-lg text-gray-700 mt-4">您可以修改以下内容：</p>
+    <ul class="list-disc list-inside text-lg text-gray-700 mt-4 space-y-2">
+        <li><strong>用户名：</strong> 修改您的显示名称，确保唯一性。</li>
+        <li><strong>电子邮件：</strong> 更新您的联系邮箱，确保邮箱格式正确。</li>
+    </ul>
+
+    <h3 class="text-2xl font-medium text-purple-700 mt-6">修改密码</h3>
+    <p class="text-lg text-gray-700 mt-4">如果您需要修改账号密码，可以通过以下步骤进行：</p>
+    <ol class="list-decimal list-inside text-lg text-gray-700 mt-4 space-y-2">
+        <li>登录到您的账号。</li>
+        <li>进入“修改密码”页面。</li>
+        <li>在页面中输入您的当前密码，并设置新密码。</li>
+        <li>点击“保存修改”按钮。</li>
+        <li>系统会提示您成功保存修改，新的密码将生效。</li>
+    </ol>
+
+    <h3 class="text-2xl font-medium text-purple-700 mt-6">修改密码注意事项</h3>
+    <ul class="list-disc list-inside text-lg text-gray-700 mt-4 space-y-2">
+        <li>确保新密码符合安全要求，建议使用大写字母、小写字母、数字及符号的组合。</li>
+        <li>如果您忘记密码，可以使用“忘记密码”功能来重设密码。</li>
+        <li>修改密码后，确保使用新密码登录。</li>
+    </ul>
+
+    <h3 class="text-2xl font-medium text-purple-700 mt-6">常见问题</h3>
+    <ul class="list-disc list-inside text-lg text-gray-700 mt-4 space-y-2">
+        <li><strong>如何修改我的用户名或邮箱？</strong> 进入个人信息页面，修改用户名或邮箱并保存。</li>
+        <li><strong>如何重设密码？</strong> 使用“忘记密码”功能，通过邮箱重设密码。</li>
+        <li><strong>修改密码后，我该怎么办？</strong> 修改密码后，使用新密码登录。</li>
+    </ul>
+{% endblock %}
