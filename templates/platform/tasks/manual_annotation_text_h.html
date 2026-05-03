@@ -1,0 +1,474 @@
+{% extends 'platform/components/base_task_h.html' %} {% block task_page_title%}人工标注{% endblock %} {% block task_details %}
+<style>
+  .candidate-item {
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .candidate-item:hover {
+    background: #f3f4f6;
+  }
+  .candidate-item.active {
+    border-left: 4px solid #2563eb;
+    background: #eff6ff;
+  }
+  .text-preview {
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.8;
+  }
+</style>
+{% endblock %} {% block task_table %}
+<div
+  class="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800 flex items-center justify-between gap-4"
+>
+  <div>
+    左侧列表按不确定性优先排序。当前共有 {{ unlabeled_count|default:0 }}
+    条待人工标注样本。保存后会将样本记为人工标注，并在后续重新调用半监督算法时纳入训练。
+  </div>
+  <button
+    id="rerun-btn"
+    class="whitespace-nowrap rounded-md bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700 transition-colors"
+  >
+    重新调用半监督算法
+  </button>
+</div>
+
+<div
+  class="grid grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)] gap-4 min-h-[760px]"
+>
+  <aside
+    class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden"
+  >
+    <div
+      class="px-4 py-3 border-b border-gray-200 flex items-center justify-between"
+    >
+      <div>
+        <div class="font-semibold text-gray-800">待标注候选</div>
+        <div class="text-xs text-gray-500">
+          共 <span id="candidate-count">0</span> 条
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <select
+          id="uncertainty-sort-select"
+          class="text-xs border rounded px-2 py-1"
+        >
+          <option value="uncertainty_desc">不确定性：高→低</option>
+          <option value="uncertainty_asc">不确定性：低→高</option>
+        </select>
+        <button
+          id="reload-candidates-btn"
+          class="text-xs text-indigo-600 hover:text-indigo-800"
+        >
+          刷新
+        </button>
+      </div>
+    </div>
+    <div
+      id="candidate-list"
+      class="max-h-[680px] overflow-y-auto divide-y divide-gray-100"
+    ></div>
+  </aside>
+
+  <main
+    class="bg-white rounded-xl border border-gray-200 shadow-sm p-5 flex flex-col gap-5"
+  >
+    <div class="flex items-start justify-between gap-4 flex-wrap">
+      <div>
+        <h3 class="text-2xl font-bold text-gray-900" id="preview-title">
+          请选择一个候选样本
+        </h3>
+        <p class="text-sm text-gray-500 mt-1" id="preview-meta">
+          系统会优先展示最不确定的文本
+        </p>
+      </div>
+      <div
+        class="text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2"
+      >
+        当前任务：{{ task.name }}
+      </div>
+    </div>
+
+    <div
+      class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-5 min-h-[560px]"
+    >
+      <div
+        class="rounded-xl bg-gray-50 border border-gray-200 min-h-[620px] h-[620px] p-5 overflow-hidden"
+      >
+        <div
+          id="preview-empty"
+          class="h-full flex items-center justify-center text-center text-gray-400"
+        >
+          <div>
+            <i class="fas fa-align-left text-5xl mb-3"></i>
+            <p>请选择左侧的文本开始标注</p>
+          </div>
+        </div>
+        <div id="preview-text-wrap" class="hidden h-full overflow-y-auto">
+          <div class="text-sm text-gray-500 mb-3">文本内容</div>
+          <div
+            id="preview-text"
+            class="text-preview text-gray-900 bg-white border border-gray-200 rounded-lg p-4"
+          ></div>
+        </div>
+      </div>
+
+      <div class="rounded-xl border border-gray-200 p-4 flex flex-col gap-4">
+        <div class="grid grid-cols-2 gap-3 text-sm">
+          <div
+            class="rounded-lg bg-gray-50 p-3 border border-gray-200 col-span-2"
+          >
+            <div class="text-gray-500">序号</div>
+            <div class="font-semibold text-gray-900" id="preview-sequence">
+              -
+            </div>
+          </div>
+          <div
+            class="rounded-lg bg-gray-50 p-3 border border-gray-200 col-span-2"
+          >
+            <div class="text-gray-500">预测标签</div>
+            <div class="font-semibold text-gray-900" id="preview-prediction">
+              -
+            </div>
+          </div>
+          <div class="rounded-lg bg-gray-50 p-3 border border-gray-200">
+            <div class="text-gray-500">置信度</div>
+            <div class="font-semibold text-gray-900" id="preview-confidence">
+              -
+            </div>
+          </div>
+          <div class="rounded-lg bg-gray-50 p-3 border border-gray-200">
+            <div class="text-gray-500">不确定性</div>
+            <div class="font-semibold text-gray-900" id="preview-uncertainty">
+              -
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2"
+            >人工标签</label
+          >
+          <input
+            id="manual-label-input"
+            type="text"
+            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+            placeholder="请输入正确标签"
+          />
+        </div>
+
+        <div class="grid grid-cols-1 gap-3 mt-auto">
+          <button
+            id="save-next-btn"
+            class="w-full px-4 py-3 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 transition-colors"
+          >
+            保存并下一张
+          </button>
+          <button
+            id="skip-btn"
+            class="w-full px-4 py-3 rounded-lg bg-gray-100 text-gray-700 font-semibold hover:bg-gray-200 transition-colors"
+          >
+            跳过当前样本
+          </button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+  const taskId = "{{ task.id }}";
+  let candidateItems = [];
+  let currentCandidateIndex = -1;
+
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== "") {
+      const cookies = document.cookie.split(";");
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === name + "=") {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  function showToast(message, type = "info") {
+    if (window.showMessage) {
+      window.showMessage(message, type);
+      return;
+    }
+    alert(message);
+  }
+
+  function normalizeConfidence(value) {
+    const parsedValue = Number.parseFloat(value || 0);
+    if (Number.isNaN(parsedValue)) {
+      return "-";
+    }
+    return parsedValue.toFixed(3);
+  }
+
+  async function fetchAllCandidates() {
+    const results = [];
+    let page = 1;
+    let totalPages = 1;
+    const sortVal =
+      document.getElementById("uncertainty-sort-select")?.value ||
+      "uncertainty_desc";
+
+    while (page <= totalPages) {
+      const params = new URLSearchParams({
+        page: String(page),
+        page_size: "200",
+        predicted_only: "1",
+        status: "未校验",
+      });
+      if (sortVal === "uncertainty_asc") params.set("sort", "uncertainty:asc");
+      else params.set("sort", "uncertainty:desc");
+
+      const response = await fetch(
+        `/tasks/${taskId}/data/?${params.toString()}`,
+      );
+      if (!response.ok) {
+        throw new Error(`加载候选样本失败: ${response.status}`);
+      }
+      const data = await response.json();
+      totalPages = data.total_pages || 1;
+      const filtered = (data.results || []).filter(
+        (item) => item.status === "未校验",
+      );
+      results.push(...filtered);
+      page += 1;
+    }
+
+    if (sortVal === "uncertainty_asc") {
+      results.sort(
+        (a, b) =>
+          parseFloat(a.uncertainty_score || 0) -
+          parseFloat(b.uncertainty_score || 0),
+      );
+    } else {
+      results.sort(
+        (a, b) =>
+          parseFloat(b.uncertainty_score || 0) -
+          parseFloat(a.uncertainty_score || 0),
+      );
+    }
+    return results;
+  }
+
+  function renderCandidateList() {
+    const list = document.getElementById("candidate-list");
+    const count = document.getElementById("candidate-count");
+    list.innerHTML = "";
+    count.textContent = candidateItems.length;
+
+    if (candidateItems.length === 0) {
+      list.innerHTML =
+        '<div class="p-4 text-sm text-gray-500">当前没有可优先标注的候选样本。</div>';
+      return;
+    }
+
+    candidateItems.forEach((item, index) => {
+      const itemEl = document.createElement("div");
+      itemEl.className = "candidate-item p-3 hover:bg-gray-50";
+      itemEl.dataset.index = String(index);
+      itemEl.innerHTML = `
+        <div class="flex items-start justify-between gap-2 mb-2">
+          <div class="font-semibold text-sm text-gray-900">#${item.sequence_number}</div>
+          <div class="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded">待标注</div>
+        </div>
+        <div class="text-xs text-gray-600 line-clamp-2 mb-2">${(item.content || "").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
+        <div class="text-xs text-gray-500">预测标签: ${item.predicted_label ?? item.label ?? "-"}</div>
+        <div class="text-xs text-gray-500">不确定性: ${normalizeConfidence(item.uncertainty_score ?? item.confidence)}</div>
+      `;
+      itemEl.addEventListener("click", () => selectCandidate(index));
+      list.appendChild(itemEl);
+    });
+  }
+
+  function highlightActiveCandidate() {
+    document.querySelectorAll(".candidate-item").forEach((el) => {
+      el.classList.toggle(
+        "active",
+        Number(el.dataset.index) === currentCandidateIndex,
+      );
+    });
+  }
+
+  function resetPreview() {
+    document.getElementById("preview-title").textContent = "请选择一个候选样本";
+    document.getElementById("preview-meta").textContent =
+      "系统会优先展示最不确定的文本";
+    document.getElementById("preview-sequence").textContent = "-";
+    document.getElementById("preview-prediction").textContent = "-";
+    document.getElementById("preview-confidence").textContent = "-";
+    document.getElementById("preview-uncertainty").textContent = "-";
+    document.getElementById("manual-label-input").value = "";
+    document.getElementById("preview-text").textContent = "";
+    document.getElementById("preview-empty").classList.remove("hidden");
+    document.getElementById("preview-text-wrap").classList.add("hidden");
+  }
+
+  function selectCandidate(index) {
+    if (index < 0 || index >= candidateItems.length) {
+      currentCandidateIndex = -1;
+      resetPreview();
+      highlightActiveCandidate();
+      return;
+    }
+
+    currentCandidateIndex = index;
+    const item = candidateItems[index];
+    document.getElementById("preview-title").textContent =
+      `样本 #${item.sequence_number}`;
+    document.getElementById("preview-meta").textContent = item.text_id || "";
+    document.getElementById("preview-sequence").textContent =
+      item.sequence_number;
+    document.getElementById("preview-prediction").textContent =
+      item.predicted_label ?? item.label ?? "-";
+    document.getElementById("preview-confidence").textContent =
+      normalizeConfidence(item.confidence);
+    document.getElementById("preview-uncertainty").textContent =
+      normalizeConfidence(item.uncertainty_score ?? item.confidence);
+    document.getElementById("manual-label-input").value =
+      item.label && item.label !== "unknown" ? item.label : "";
+    document.getElementById("preview-text").textContent = item.content || "";
+    document.getElementById("preview-empty").classList.add("hidden");
+    document.getElementById("preview-text-wrap").classList.remove("hidden");
+    highlightActiveCandidate();
+  }
+
+  function removeCurrentCandidate() {
+    if (currentCandidateIndex < 0) {
+      return;
+    }
+
+    candidateItems.splice(currentCandidateIndex, 1);
+    renderCandidateList();
+
+    if (candidateItems.length === 0) {
+      currentCandidateIndex = -1;
+      resetPreview();
+      highlightActiveCandidate();
+      return;
+    }
+
+    const nextIndex = Math.min(
+      currentCandidateIndex,
+      candidateItems.length - 1,
+    );
+    selectCandidate(nextIndex);
+  }
+
+  async function saveManualLabel() {
+    if (currentCandidateIndex < 0) {
+      showToast("请先选择一个样本", "warning");
+      return;
+    }
+
+    const item = candidateItems[currentCandidateIndex];
+    const label = document.getElementById("manual-label-input").value.trim();
+    if (!label) {
+      showToast("请输入人工标签", "warning");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("item_id", item.id);
+    formData.append("label", label);
+
+    const response = await fetch(`/tasks/${taskId}/manual_annotation/save/`, {
+      method: "POST",
+      headers: { "X-CSRFToken": getCookie("csrftoken") },
+      body: formData,
+    });
+
+    const data = await response.json();
+    if (!response.ok || data.status !== "success") {
+      throw new Error(data.message || "保存失败");
+    }
+
+    showToast(data.message || "人工标注已保存", "success");
+    removeCurrentCandidate();
+  }
+
+  async function rerunSemiSupervised() {
+    const response = await fetch(`/tasks/${taskId}/manual_annotation/rerun/`, {
+      method: "POST",
+      headers: { "X-CSRFToken": getCookie("csrftoken") },
+    });
+
+    const data = await response.json();
+    if (!response.ok || data.status !== "success") {
+      throw new Error(data.message || "重新调用失败");
+    }
+
+    showToast(data.message || "已重新调用半监督算法", "success");
+    setTimeout(() => window.location.reload(), 1200);
+  }
+
+  async function initPage() {
+    try {
+      candidateItems = await fetchAllCandidates();
+      renderCandidateList();
+      if (candidateItems.length > 0) {
+        selectCandidate(0);
+      } else {
+        resetPreview();
+      }
+    } catch (error) {
+      console.error(error);
+      showToast(error.message, "error");
+    }
+  }
+
+  document
+    .getElementById("save-next-btn")
+    .addEventListener("click", async () => {
+      try {
+        await saveManualLabel();
+      } catch (error) {
+        console.error(error);
+        showToast(error.message, "error");
+      }
+    });
+
+  document
+    .getElementById("skip-btn")
+    .addEventListener("click", () => removeCurrentCandidate());
+  document
+    .getElementById("reload-candidates-btn")
+    .addEventListener("click", async () => initPage());
+  document
+    .getElementById("uncertainty-sort-select")
+    .addEventListener("change", async () => initPage());
+  document.getElementById("rerun-btn").addEventListener("click", async () => {
+    try {
+      await rerunSemiSupervised();
+    } catch (error) {
+      console.error(error);
+      showToast(error.message, "error");
+    }
+  });
+  document
+    .getElementById("manual-label-input")
+    .addEventListener("keydown", async (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        try {
+          await saveManualLabel();
+        } catch (error) {
+          console.error(error);
+          showToast(error.message, "error");
+        }
+      }
+    });
+
+  document.addEventListener("DOMContentLoaded", initPage);
+</script>
+{% endblock %}

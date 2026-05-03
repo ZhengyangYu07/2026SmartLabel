@@ -40,7 +40,14 @@ def run_training(config_path):
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
 
-    device = config.get("device", "cuda")
+    # 自动检测CUDA可用性
+    device_str = config.get("device", "cuda")
+    if device_str == "cuda" and not torch.cuda.is_available():
+        device = torch.device("cpu")
+        print("警告：CUDA不可用，已自动切换到CPU")
+    else:
+        device = torch.device(device_str)
+    
     batch_size = config.get("batch_size", 32)
     embedding_dir = config.get("embedding_save_path", "embeddings/")
     os.makedirs(embedding_dir, exist_ok=True)
@@ -54,6 +61,9 @@ def run_training(config_path):
     try:
         all_df = pd.read_csv(dataset_path, encoding='utf-8')
         all_df['label'] = all_df['label'].fillna('') 
+        # 处理 is_labeled 列：从 CSV 读出后可能是字符串，需要转换为布尔值
+        if 'is_labeled' in all_df.columns:
+            all_df['is_labeled'] = all_df['is_labeled'].astype(str).str.lower().isin(['true', '1'])
     except FileNotFoundError:
         print(f"错误：数据集文件未找到 at {dataset_path}")
         raise
@@ -63,6 +73,13 @@ def run_training(config_path):
 
     if 'is_labeled' not in all_df.columns:
         raise ValueError(f"数据集 {dataset_path} 中缺少 'is_labeled' 列。")
+    
+    # 确保 is_labeled 是布尔值
+    # 处理可能的字符串值
+    if all_df['is_labeled'].dtype == 'object':
+        all_df['is_labeled'] = all_df['is_labeled'].astype(str).str.lower().isin(['true', '1'])
+    else:
+        all_df['is_labeled'] = all_df['is_labeled'].astype(bool)
         
     labeled_df = all_df[all_df['is_labeled'] == True].copy()
     unlabeled_df = all_df[all_df['is_labeled'] == False].copy()
@@ -260,12 +277,16 @@ def run_training(config_path):
     output_df = pd.DataFrame()
     output_df['text_id'] = all_df.index.astype(str)
     output_df['content'] = all_df['text']
-    predicted_labels = all_df["predicted_label_index"].apply(lambda x: id2label.get(x, "") if pd.notna(x) else "")
-    output_df['label'] = all_df['label'].where(all_df.index < len(labeled_df), predicted_labels)
-    model_confidence = all_df.get('cg3_conf', pd.Series([0.95] * len(all_df)))
-    # 有标签样本（视为人工标注）的置信度设定为-1，在前端页面展示时与机器标注样本区分
-    output_df['confidence'] = -1
-    output_df['confidence'] = output_df['confidence'].where(all_df.index < len(labeled_df), model_confidence)
+    
+    # 处理预测标签和标签
+    predicted_labels = all_df["predicted_label_index"].apply(lambda x: id2label.get(int(x), "") if pd.notna(x) and x != -1 else "")
+    # 有标签数据使用原始 label，无标签数据使用预测 label
+    output_df['label'] = [all_df.iloc[i]['label'] if i < len(labeled_df) else predicted_labels.iloc[i] for i in range(len(all_df))]
+    
+    # 获取置信度
+    model_confidence = all_df['cg3_conf'] if 'cg3_conf' in all_df.columns else pd.Series([0.95] * len(all_df), index=all_df.index)
+    # 有标签样本置信度设为 -1（表示人工标注），无标签样本使用模型置信度
+    output_df['confidence'] = [-1.0 if i < len(labeled_df) else model_confidence.iloc[i] for i in range(len(all_df))]
 
     output_path = os.path.join(config["output_path"], "result.csv")
     output_df.to_csv(output_path, index=False, encoding='utf-8')

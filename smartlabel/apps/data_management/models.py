@@ -27,6 +27,13 @@ class Task(models.Model):
     description = models.TextField(blank=True, verbose_name="任务描述")
     task_type = models.CharField(max_length=20, choices=TYPE_CHOICES, verbose_name="任务类型")
     labeling_type = models.CharField(max_length=20, choices=LABELING_CHOICES, verbose_name="标注模式",default="pre-trained")
+    # 文本分类下的场景选择：情感分析 / 主题分类 / 内容审核
+    CLASSIFICATION_SCENE_CHOICES = (
+        ('sentiment', '情感分析'),
+        ('topic', '主题分类'),
+        ('moderation', '内容审核'),
+    )
+    classification_scene = models.CharField(max_length=30, choices=CLASSIFICATION_SCENE_CHOICES, blank=True, null=True, verbose_name="分类场景")
 
     # 数据和模型配置信息
     data_file = models.FileField(upload_to='uploads/data/%Y/%m/%d/', verbose_name="数据文件")

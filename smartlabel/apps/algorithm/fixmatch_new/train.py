@@ -214,9 +214,14 @@ def main():
         return model
 
     if args.local_rank == -1:
-        device = torch.device('cuda', args.gpu_id)
+        # 检查CUDA是否可用
+        if torch.cuda.is_available() and args.gpu_id >= 0:
+            device = torch.device('cuda', args.gpu_id)
+            args.n_gpu = torch.cuda.device_count()
+        else:
+            device = torch.device('cpu')
+            args.n_gpu = 0
         args.world_size = 1
-        args.n_gpu = torch.cuda.device_count()
     else:
         torch.cuda.set_device(args.local_rank)
         device = torch.device('cuda', args.local_rank)

@@ -115,6 +115,24 @@
         </select>
       </div>
 
+      <!-- 文本分类时显示：分类场景 -->
+      <div x-show="task_type === 'text-classification'" x-cloak>
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          <i class="fas fa-layer-group text-blue-500 mr-2"></i>分类场景
+          <span class="text-gray-400 text-xs ml-1">（仅文本分类）</span>
+        </label>
+        <select
+          name="classification_scene"
+          x-model="classification_scene"
+          class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-400 bg-white appearance-none"
+        >
+          <option value="" disabled selected>请选择分类场景</option>
+          <option value="sentiment">情感分析</option>
+          <option value="topic">主题分类</option>
+          <option value="moderation">内容审核</option>
+        </select>
+      </div>
+
       <input type="hidden" name="labeling_type" x-model="labeling_type" />
 
       <!-- 数据上传 -->
@@ -294,6 +312,7 @@
       task_type: "",
       dataFileName: "",
       labelFileName: "",
+      classification_scene: "",
       isSubmitting: false,
       data_file_validated: false /* 数据文件内容校验是否成功 */,
       validationMessage: "" /* 校验提示信息 */,
@@ -421,6 +440,11 @@
           if (!this.$refs.task_name.value.trim())
             errors.push("任务名称不能为空");
           if (!this.task_type) errors.push("请选择目标任务");
+          if (
+            this.task_type === "text-classification" &&
+            !this.classification_scene
+          )
+            errors.push('请选择文本分类的 "分类场景"');
 
           if (!dataFileInput || dataFileInput.files.length === 0) {
             errors.push("请上传数据文件");

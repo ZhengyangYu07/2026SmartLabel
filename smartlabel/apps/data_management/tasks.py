@@ -258,6 +258,14 @@ def save_results_to_database(result_file_path, task, task_type, update_progress_
 
     batch_size = 100
 
+    def _safe_float(value, default=0.0):
+        try:
+            if value in (None, ''):
+                return default
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
     with open(result_file_path, newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         results_data = list(reader)  # 先读取所有数据到列表
@@ -275,7 +283,7 @@ def save_results_to_database(result_file_path, task, task_type, update_progress_
                     image_name=res_data.get('image_name', ''),
                     image_path=res_data.get('image_path', ''),
                     label=res_data.get('label', ''),
-                    confidence=float(res_data.get('confidence', 0.0))
+                    confidence=_safe_float(res_data.get('confidence', 0.0))
                 )
             elif task_type == 'text-classification':
                 instance = ResultModel(
@@ -284,7 +292,7 @@ def save_results_to_database(result_file_path, task, task_type, update_progress_
                     text_id=res_data.get('text_id', ''),
                     content=res_data.get('content', ''),
                     label=res_data.get('label', ''),
-                    confidence=float(res_data.get('confidence', 0.0))
+                    confidence=_safe_float(res_data.get('confidence', 0.0))
                 )
             else:
                 continue # 如果有其他类型，暂时跳过
@@ -339,7 +347,7 @@ def _process_common_pretrained_task(self, task_id, task, update_progress, result
         ]
         
     elif task.task_type == 'text-classification':
-        # 定义常见文本列名关键词，与 qwen_text.py 保持一致
+        # 定义常见文本列名关键词
         TEXT_COLUMN_KEYWORDS = ['text', 'content', 'body', 'sentence', 'article', 'description', 'message']
         
         # 统计所有CSV文件中的文本条目总数，用于进度跟踪
@@ -376,24 +384,34 @@ def _process_common_pretrained_task(self, task_id, task, update_progress, result
 
         logger.info(f"总计找到 {total_input_items} 条文本数据待处理。")
 
-        # 构建文本分类的配置
-        config = {
-            "text_input_dir": str(extract_dir), # 直接传递目录路径
-            "label_choices": [],
-            "restrict_labels": True,
-            "output_path": output_csv,
-            "generation_params": {
-                "do_sample": True,
-                "temperature": 0.7,
-                "top_p": 0.9,
-                "max_new_tokens": 512
-            }
-        }
+        # 所有文本分类场景都使用 BERT
+        classification_scene = getattr(task, 'classification_scene', '') or ''
+        if classification_scene == 'sentiment':
+            if not task.label_list:
+                task.label_list = ['正面', '负面', '中性']
+                task.save(update_fields=['label_list'])
+            label_choices = list(task.label_list or ['正面', '负面', '中性'])
+        else:
+            label_choices = []
         
-        # 构建命令 - 调用新的 qwen_text.py 脚本
+        config = {
+            "text_input_dir": str(extract_dir),
+            "dataset_path": str(extract_dir),
+            "output_path": output_csv,
+            "label_choices": label_choices,
+            "bert_model": "bert-base-chinese",
+            "device": "cuda" if torch.cuda.is_available() else "cpu",
+            "epochs": 6,
+            "batch_size": 32,
+            "learning_rate": 2e-5,
+            "max_length": 128,
+            "hidden_dim": 256
+        }
+
+        # 全部使用 BERT
         cmd = [
-            'conda', 'run', '--no-capture-output', '-n', 'qwen', 'python',
-            os.path.join(settings.BASE_DIR, 'smartlabel', 'apps', 'algorithm', 'qwen', 'qwen_txt.py'), # 调用 qwen_text.py
+            'conda', 'run', '--no-capture-output', '-n', 'bert', 'python',
+            os.path.join(settings.BASE_DIR, 'smartlabel', 'apps', 'algorithm', 'bert', 'train.py'),
             '--config', config_path
         ]
         
@@ -649,103 +667,199 @@ def process_annotation_task(self, task_id):
 
         # ==================== 文本分类逻辑 ====================
         elif task.task_type == 'text-classification':
-            
-            # --- 1. 校验并读取有标签数据 ---
-            if not task.label_file or not Path(task.label_file.path).exists():
-                raise FileNotFoundError("文本分类任务必须提供一个有效的标注文件。")
-            
-            label_file_path = Path(task.label_file.path)
-            try:
-                with open(label_file_path, 'r', encoding='utf-8') as f:
-                    header = f.readline().strip().lower()
-                    if 'text' not in header or 'label' not in header:
-                        raise ValueError("标注文件的第一行（表头）必须包含 'text' 和 'label' 列。")
-                
-                labeled_df = pd.read_csv(label_file_path, encoding='utf-8')
-                text_col_labeled = next((col for col in labeled_df.columns if 'text' in col.lower()), 'text')
-                label_col_labeled = next((col for col in labeled_df.columns if 'label' in col.lower() or 'class' in col.lower()), 'label')
-                labeled_df = labeled_df[[text_col_labeled, label_col_labeled]].rename(columns={text_col_labeled: 'text', label_col_labeled: 'label'})
-                labeled_df['is_labeled'] = True
-                logger.info(f"成功从 {label_file_path.name} 加载 {len(labeled_df)} 条有标签数据。")
-            except Exception as e:
-                raise ValueError(f"读取或处理标注文件失败: {e}")
-
-            _update_task_progress(task, 10, self)
-
-            # --- 2. 校验并读取无标签数据 ---
-            # 这里的 extract_dir 已经是 Path 对象，可以直接调用 .glob()
+            classification_scene = getattr(task, 'classification_scene', '') or ''
             unlabeled_files = list(extract_dir.glob('*.csv'))
             if not unlabeled_files:
                 raise FileNotFoundError(f"数据压缩包解压后，在目录 {extract_dir} 中未找到任何 .csv 文件。")
 
-            unlabeled_data_list = []
             TEXT_COLUMN_KEYWORDS = ['text', 'content', 'body', 'sentence', 'article', 'description', 'message']
-            for unlabeled_file in unlabeled_files:
+
+            if not task.label_file or not Path(task.label_file.path).exists():
+                # 无标签文本任务：只输出不确定性，预测标签和置信度保持空。
+                texts = []
+                for unlabeled_file in unlabeled_files:
+                    try:
+                        df = pd.read_csv(unlabeled_file, encoding='utf-8')
+                        text_col = next((col for col in df.columns if col.strip().lower() in TEXT_COLUMN_KEYWORDS), df.columns[0] if len(df.columns) > 0 else None)
+                        if text_col:
+                            texts.extend(df[text_col].fillna('').astype(str).tolist())
+                    except Exception as e:
+                        logger.warning(f"读取无标签文件 {unlabeled_file.name} 失败: {e}。已跳过。")
+
+                if not texts:
+                    raise ValueError("未能从数据文件中成功提取任何无标签文本。")
+
+                lengths = [max(len(text.split()), 1) for text in texts]
+                min_len = min(lengths)
+                max_len = max(lengths)
+                length_span = max(max_len - min_len, 1)
+
+                result_rows = []
+                for index, text in enumerate(texts, start=1):
+                    length_score = max(0.0, min(1.0, 1.0 - ((max(len(text.split()), 1) - min_len) / length_span)))
+                    uncertainty_score = round(float(length_score), 6)
+                    result_rows.append({
+                        'text_id': str(index),
+                        'content': text,
+                        'label': '',
+                        'confidence': '',
+                        'uncertainty_score': uncertainty_score,
+                    })
+
+                result_dir.mkdir(parents=True, exist_ok=True)
+                with open(result_file_path, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.DictWriter(f, fieldnames=['text_id', 'content', 'label', 'confidence', 'uncertainty_score'])
+                    writer.writeheader()
+                    writer.writerows(result_rows)
+
+                _update_task_progress(task, 30, self)
+                save_results_to_database(result_file_path, task, 'text-classification', update_progress)
+
+            else:
+                label_file_path = Path(task.label_file.path)
                 try:
-                    df = pd.read_csv(unlabeled_file, encoding='utf-8')
-                    text_col_unlabeled = next((col for col in df.columns if col.strip().lower() in TEXT_COLUMN_KEYWORDS), df.columns[0] if len(df.columns) > 0 else None)
-                    if text_col_unlabeled:
-                        unlabeled_data_list.append(df[[text_col_unlabeled]].rename(columns={text_col_unlabeled: 'text'}))
+                    with open(label_file_path, 'r', encoding='utf-8') as f:
+                        header = f.readline().strip().lower()
+                        if 'text' not in header or 'label' not in header:
+                            raise ValueError("标注文件的第一行（表头）必须包含 'text' 和 'label' 列。")
+
+                    labeled_df = pd.read_csv(label_file_path, encoding='utf-8')
+                    text_col_labeled = next((col for col in labeled_df.columns if 'text' in col.lower()), 'text')
+                    label_col_labeled = next((col for col in labeled_df.columns if 'label' in col.lower() or 'class' in col.lower()), 'label')
+                    labeled_df = labeled_df[[text_col_labeled, label_col_labeled]].rename(columns={text_col_labeled: 'text', label_col_labeled: 'label'})
+                    labeled_df['is_labeled'] = True
+                    logger.info(f"成功从 {label_file_path.name} 加载 {len(labeled_df)} 条有标签数据。")
                 except Exception as e:
-                    logger.warning(f"读取无标签文件 {unlabeled_file.name} 失败: {e}。已跳过。")
-            
-            if not unlabeled_data_list:
-                raise ValueError("未能从数据文件中成功提取任何无标签文本。")
-            unlabeled_df = pd.concat(unlabeled_data_list, ignore_index=True)
-            unlabeled_df['label'] = None
-            unlabeled_df['is_labeled'] = False
-            logger.info(f"成功加载 {len(unlabeled_df)} 条无标签数据。")
+                    raise ValueError(f"读取或处理标注文件失败: {e}")
 
-            _update_task_progress(task, 15, self)
+                _update_task_progress(task, 10, self)
 
-            # --- 3. 合并数据集 ---
-            combined_df = pd.concat([labeled_df, unlabeled_df], ignore_index=True)
-            combined_df['text'] = combined_df['text'].astype(str)
-            combined_df = combined_df.drop_duplicates(subset=['text'], keep='first')
-            
-            combined_data_file = result_dir / 'combined_dataset.csv'
-            combined_df.to_csv(combined_data_file, index=False, encoding='utf-8')
-            logger.info(f"合并后的数据集已保存到: {combined_data_file}")
+                unlabeled_data_list = []
+                for unlabeled_file in unlabeled_files:
+                    try:
+                        df = pd.read_csv(unlabeled_file, encoding='utf-8')
+                        text_col_unlabeled = next((col for col in df.columns if col.strip().lower() in TEXT_COLUMN_KEYWORDS), df.columns[0] if len(df.columns) > 0 else None)
+                        if text_col_unlabeled:
+                            temp_df = df[[text_col_unlabeled]].rename(columns={text_col_unlabeled: 'text'}).copy()
+                            temp_df['label'] = ''
+                            unlabeled_data_list.append(temp_df)
+                    except Exception as e:
+                        logger.warning(f"读取无标签文件 {unlabeled_file.name} 失败: {e}。已跳过。")
 
-            _update_task_progress(task, 20, self)
+                if not unlabeled_data_list:
+                    raise ValueError("未能从数据文件中成功提取任何无标签文本。")
+                unlabeled_df = pd.concat(unlabeled_data_list, ignore_index=True)
+                unlabeled_df['is_labeled'] = False
+                logger.info(f"成功加载 {len(unlabeled_df)} 条无标签数据。")
 
-            # --- 4. 创建配置文件 ---
-            config = {
-                "dataset_path": str(combined_data_file),
-                "dataset_format": "csv",
-                "bert_model": "bert-base-uncased",
-                "embedding_save_path": str(result_dir / "embedding/"),
-                "output_path": str(result_dir),
-                "batch_size": 32,
-                "device": "cuda" if torch.cuda.is_available() else "cpu",
-                "cg3_use": True, "cg3_k": 20, "cg3_lr": 1e-3, "cg3_epochs": 100, "cg3_threshold": 0.8,
-                "llgc_use": True, "llgc_alpha": 0.5,
-                "manifold_use": True, "manifold_k": 20, "manifold_sigma": 0.5, "manifold_components": 128, "manifold_epochs": 30, "manifold_lr": 0.01, "manifold_landmarks": 1000,
-                "mixtext_use": True, "mixtext_lr": 1e-3, "mixtext_alpha": 0.4, "mixtext_epochs": 100
-            }
-            with open(config_path, 'w', encoding='utf-8') as f:
-                json.dump(config, f, ensure_ascii=False, indent=4)
+                _update_task_progress(task, 15, self)
 
-            _update_task_progress(task, 25, self)
-            
-            # --- 5. 构建并执行命令 ---
-            algorithm_script_path = Path(settings.BASE_DIR) / 'smartlabel' / 'apps' / 'algorithm' / 'text_classification' / 'train.py'
-            cmd = ['conda', 'run', '--no-capture-output', '-n', 'text_classification', 'python', str(algorithm_script_path), '--config', str(config_path)]
-            logger.info(f"执行命令: {' '.join(shlex.quote(s) for s in cmd)}")
-            _update_task_progress(task, 30, self)
-            run_subprocess_with_progress(cmd, task_id)
-            _update_task_progress(task, 80, self)
-            
-            # --- 6. 检查并保存结果 ---
-            # 运行子进程后，主动更新一次进度，确保在保存结果前UI有反馈
-            task.refresh_from_db() # 获取子进程更新的最新进度
-            # 在这里根据算法的最后阶段设置一个进度
-            update_progress(98, 100) 
-            
-            if not result_file_path.exists():
-                raise FileNotFoundError(f"文本分类结果文件不存在: {result_file_path}")
-            _update_task_progress(task, 85, self)
-            save_results_to_database(result_file_path, task, 'text-classification', update_progress)
+                combined_df = pd.concat([labeled_df, unlabeled_df], ignore_index=True)
+                combined_df['text'] = combined_df['text'].astype(str)
+                combined_df['is_labeled'] = combined_df['is_labeled'].astype(bool)
+                combined_df = combined_df.drop_duplicates(subset=['text'], keep='first')
+
+                combined_data_file = result_dir / 'combined_dataset.csv'
+                combined_df.to_csv(combined_data_file, index=False, encoding='utf-8')
+                logger.info(f"合并后的数据集已保存到: {combined_data_file}")
+
+                _update_task_progress(task, 20, self)
+
+                result_dir.mkdir(parents=True, exist_ok=True)
+                embedding_dir = result_dir / "embeddings"
+                embedding_dir.mkdir(parents=True, exist_ok=True)
+
+                # 根据场景选择不同的算法
+                if classification_scene == 'topic':
+                    # 主题分类使用 FlexMatch 半监督算法
+                    logger.info("主题分类任务，调用 FlexMatch 算法")
+                    
+                    config = {
+                        "dataset_path": str(combined_data_file),
+                        "output_path": str(result_dir),
+                        "language": "zh",
+                        "bert_model": "hfl/chinese-roberta-wwm-ext",
+                        "batch_size": 32,
+                        "device": "cuda" if torch.cuda.is_available() else "cpu",
+                        "epochs": 200,
+                        "num_train_iter": 1024,
+                        "ema_m": 0.999,
+                        "T": 0.5,
+                        "p_cutoff": 0.95,
+                        "ulb_loss_ratio": 1.0,
+                        "hard_label": True,
+                        "num_eval_iter": 1000,
+                        "optim": "sgd",
+                        "lr": 0.03,
+                        "momentum": 0.9,
+                        "weight_decay": 5e-4,
+                    }
+                    with open(config_path, 'w', encoding='utf-8') as f:
+                        json.dump(config, f, ensure_ascii=False, indent=4)
+
+                    logger.info(f"配置文件已保存到: {config_path}")
+                    _update_task_progress(task, 25, self)
+
+                    # 调用 FlexMatch 脚本用于主题分类
+                    algorithm_script_path = Path(settings.BASE_DIR) / 'smartlabel' / 'apps' / 'algorithm' / 'TorchSSL-main' / 'flexmatch_text.py'
+                    cmd = ['python', str(algorithm_script_path), '--config', str(config_path)]
+
+                else:
+                    # 其他场景使用集成算法（情感分析、内容审核等）
+                    logger.info("文本分类任务，调用集成算法（CG3+LLGC+ManifoldClassifier+MixText）")
+                    
+                    config = {
+                        "dataset_path": str(combined_data_file),
+                        "dataset_format": "csv",
+                        "embedding_save_path": str(embedding_dir),
+                        "output_path": str(result_dir),
+                        "language": "zh",
+                        "bert_model": "hfl/chinese-roberta-wwm-ext",
+                        "batch_size": 32,
+                        "device": "cuda" if torch.cuda.is_available() else "cpu",
+                        "cg3_use": True,
+                        "cg3_epochs": 200,
+                        "cg3_lr": 0.001,
+                        "cg3_k": 15,
+                        "cg3_threshold": 0.7,
+                        "cg3_sigma": 0.5,
+                        "cg3_warmup": 10,
+                        "llgc_use": True,
+                        "llgc_alpha": 0.99,
+                        "manifold_use": True,
+                        "manifold_epochs": 400,
+                        "manifold_k": 10,
+                        "manifold_sigma": 0.5,
+                        "manifold_components": 64,
+                        "manifold_lr": 0.001,
+                        "manifold_landmarks": 1000,
+                        "mixtext_use": True,
+                        "mixtext_epochs": 100,
+                        "mixtext_lr": 0.001,
+                        "mixtext_alpha": 0.4
+                    }
+                    with open(config_path, 'w', encoding='utf-8') as f:
+                        json.dump(config, f, ensure_ascii=False, indent=4)
+
+                    logger.info(f"配置文件已保存到: {config_path}")
+                    _update_task_progress(task, 25, self)
+
+                    # 调用集成算法脚本
+                    algorithm_script_path = Path(settings.BASE_DIR) / 'smartlabel' / 'apps' / 'algorithm' / 'text_classification' / 'train.py'
+                    cmd = ['conda', 'run', '--no-capture-output', '-n', 'text_classification', 'python', str(algorithm_script_path), '--config', str(config_path)]
+
+                logger.info(f"执行命令: {' '.join(shlex.quote(s) for s in cmd)}")
+                _update_task_progress(task, 30, self)
+                run_subprocess_with_progress(cmd, task_id)
+                _update_task_progress(task, 80, self)
+
+                task.refresh_from_db()
+                update_progress(98, 100)
+
+                if not result_file_path.exists():
+                    raise FileNotFoundError(f"文本分类结果文件不存在: {result_file_path}")
+                _update_task_progress(task, 85, self)
+                save_results_to_database(result_file_path, task, 'text-classification', update_progress)
 
         # --- 任务完成 ---
         task.progress = 100

@@ -29,7 +29,7 @@ TASK_CONFIG = {
     },
     'text-classification': {
         'result_model': TextResult,
-        'detail_template': 'platform/tasks/text_detail.html',
+        'detail_template': 'platform/tasks/text_detail_h.html',
         'csv_fields': [
             ('id', 'ID'),
             ('content', '内容'),
@@ -49,11 +49,17 @@ class TaskService:
     @staticmethod
     def get_common_context(task):
         """获取公共上下文数据"""
+        config = TASK_CONFIG[task.task_type]
+        result_model = config['result_model']
+        relation_field = config['relation_field']
+        total_count = result_model.objects.filter(**{relation_field: task}).count()
+        task.total_count = total_count
         return {
             'task': task,
             'total_tasks': Task.objects.count(),
             'total_verified': Task.objects.filter(status='verified').count(),
-            'config': TASK_CONFIG[task.task_type]
+            'config': config,
+            'task_total_count': total_count,
         }
 
     @staticmethod

@@ -1,0 +1,13 @@
+{
+  "bert_model": "bert-base-chinese",
+  "text_input_dir": "",
+  "dataset_path": "",
+  "output_path": "",
+  "batch_size": 32,
+  "device": "cuda",
+  "epochs": 6,
+  "learning_rate": 2e-5,
+  "max_length": 128,
+  "label_choices": [],
+  "hidden_dim": 256
+}

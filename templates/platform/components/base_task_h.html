@@ -1,15 +1,16 @@
-{% extends 'platform/components/base.html' %} {% block title %}{{ task.name }} -
-{% block task_page_title %}任务详情{% endblock %}{% endblock %} {% block breadcrumb %}
+{% extends 'platform/components/base.html' %} {% load static %} {% block title%}
+{{ task.name }} - {% endblock %} {% block task_page_title %} 任务详情
+{%endblock%} {% block breadcrumb %}
 <span>
   数据标注 >>
-  <a href="{% url 'manage_task' %}" class="text-blue-600 hover:underline"
-    >管理任务</a
-  >
+  <a href="{% url 'manage_task' %}" class="text-blue-600 hover:underline">
+    管理任务
+  </a>
   >> 任务详情
 </span>
-{% endblock %} {% load static %} {% block css %}
+{% endblock %} {% block css %}
 <link rel="stylesheet" href="{% static 'css/base_task_detail.css' %}" />
-{% block task_details %}{% endblock %} {% endblock %} {% block content %}
+{% endblock %} {% block task_details %}{% endblock %} {% block content %}
 <div
   class="bg-gradient-to-b from-purple-900 to-blue-800 text-white shadow-lg rounded-lg mb-4"
 >
@@ -53,7 +54,6 @@
         >
           已标注
         </a>
-        {% if task.task_type == 'image-classification' %}
         <a
           href="{% url 'unlabeled_detail' task.id %}"
           class="inline-flex items-center px-4 py-2 rounded-full border border-white/30 transition-colors {% if task_view_mode == 'unlabeled' %}bg-white text-purple-900 font-semibold{% else %}bg-white/10 text-white hover:bg-white/20{% endif %}"
@@ -66,7 +66,6 @@
         >
           人工标注
         </a>
-        {% endif %}
       </div>
     </div>
   </div>
@@ -125,9 +124,9 @@
         </dd>
       </div>
       <div class="flex flex-col">
-        <dt class="text-gray-600">总计（已标注）</dt>
+        <dt class="text-gray-600">总计</dt>
         <dd id="total-verifiable-count" class="font-medium">
-          {{ task.total_verifiable_count|default:"0" }}
+          {{ task.total_count|default:"0" }}
         </dd>
       </div>
       <div class="flex flex-col">
