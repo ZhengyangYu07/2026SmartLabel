@@ -10,7 +10,8 @@
   class="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800 flex items-center justify-between gap-4"
 >
   <div>
-    左侧列表按不确定性优先排序。当前共有 {{ unlabeled_count|default:0 }}
+    左侧列表按不确定性优先排序。当前共有
+    <span id="manual-unlabeled-count">{{ unlabeled_count|default:0 }}</span>
     条未标注样本。标注完成后点击“保存并下一张”，系统会把该样本记为人工标注，并在后续重新调用半监督算法时纳入训练。
   </div>
   <button
@@ -351,7 +352,20 @@
     }
 
     showToast(data.message || "人工标注已保存", "success");
+    // 先移除当前候选项，再重新初始化页面以保证与后端保持一致
     removeCurrentCandidate();
+    try {
+      await initPage();
+    } catch (e) {
+      console.warn("重新加载候选列表失败", e);
+    }
+    if (window.refreshTaskStatistics) {
+      try {
+        await window.refreshTaskStatistics(taskId);
+      } catch (e) {
+        console.warn("刷新任务统计失败", e);
+      }
+    }
   }
 
   async function rerunSemiSupervised() {

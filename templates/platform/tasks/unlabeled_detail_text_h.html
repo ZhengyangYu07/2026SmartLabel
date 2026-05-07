@@ -37,7 +37,7 @@
       <div>
         <div class="font-semibold text-gray-800">未标注样本</div>
         <div class="text-xs text-gray-500">
-          共 <span id="total-count">0</span> 条
+          共 {{ task.uploaded_total|default:0 }} 条
         </div>
       </div>
       <div class="flex items-center gap-2">
@@ -189,11 +189,11 @@
 
   function getSidebarStatusBadge(status) {
     if (status === "已校验") {
-      return '<span class="status-badge verified">已校验</span>';
+      return '<div class="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded">已校验</div>';
     } else if (status === "已标注") {
-      return '<span class="status-badge manual">已标注</span>';
+      return '<div class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">已标注</div>';
     }
-    return '<span class="status-badge unverified">未校验</span>';
+    return '<div class="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded">待标注</div>';
   }
 
   async function fetchAllUnlabeledData() {
@@ -224,6 +224,14 @@
     }
 
     return { results, total_count: serverTotal, total_pages: totalPages };
+  }
+
+  // 总数使用任务上传时统计的固定值（服务端渲染），无需客户端再请求。
+
+  async function refreshCounts() {
+    if (window.refreshTaskStatistics) {
+      await window.refreshTaskStatistics(taskId);
+    }
   }
 
   function renderListItem(item) {
@@ -358,27 +366,41 @@
       .finally(() => window.hideGlobalLoading());
   }
 
-  // 添加“通过”按钮，标记当前项为已校验
-  function verifyCurrentItem() {
+  // 添加“通过”按钮，按人工标注保存口径把当前项加入已标注集合
+  async function verifyCurrentItem() {
     if (!currentItem) {
       window.showMessage("请先选择一个样本", "warning");
       return;
     }
     const itemId = currentItem.id;
+    const label = (
+      currentItem.label ??
+      currentItem.predicted_label ??
+      ""
+    ).trim();
+
+    if (!label) {
+      window.showMessage("标签不能为空", "warning");
+      return;
+    }
+
     window.showGlobalLoading();
-    fetch(`/tasks/${taskId}/verify/`, {
+    const formData = new FormData();
+    formData.append("item_id", itemId);
+    formData.append("label", label);
+
+    fetch(`/tasks/${taskId}/manual_annotation/add_unlabeled/`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
         "X-CSRFToken": window.getCookie ? window.getCookie("csrftoken") : "",
       },
-      body: `item_id=${itemId}&target_status=已校验`,
+      body: formData,
     })
       .then((r) => r.json())
       .then((data) => {
         if (data.status === "success") {
-          window.showMessage("已标记为已校验", "success");
-          loadData();
+          window.showMessage("已加入已标注界面", "success");
+          return loadData().then(() => refreshCounts());
         } else {
           window.showMessage(data.message || "操作失败", "error");
         }
@@ -390,10 +412,8 @@
   async function loadData() {
     try {
       const data = await fetchAllUnlabeledData();
+      // 顶部总计为服务端渲染的固定值，不随刷新变化。
       allItems = data.results || [];
-
-      document.getElementById("total-count").textContent =
-        data.total_count || allItems.length || 0;
       const listContainer = document.getElementById("item-list");
       listContainer.innerHTML = "";
 
@@ -408,6 +428,7 @@
       });
 
       selectItem(allItems[0]);
+      await refreshCounts();
     } catch (err) {
       window.showMessage(`加载失败: ${err.message}`, "error");
     }

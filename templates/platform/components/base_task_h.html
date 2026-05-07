@@ -126,7 +126,9 @@
       <div class="flex flex-col">
         <dt class="text-gray-600">总计</dt>
         <dd id="total-verifiable-count" class="font-medium">
-          {{ task.total_count|default:"0" }}
+          {% if task_view_mode == 'unlabeled' or task_view_mode == 'manual' %}
+          {{ task.uploaded_total|default:"0" }} {% else %} {{
+          task.total_count|default:"0" }} {% endif %}
         </dd>
       </div>
       <div class="flex flex-col">
@@ -171,6 +173,7 @@
   const taskCompletionRedirectUrl =
     "{{ task_completion_redirect_url|default:''|escapejs }}";
   const initialTaskStatus = "{{ task.status|escapejs }}";
+  const taskViewMode = "{{ task_view_mode|default:'labeled' }}";
 
   // 任务状态到CSS类的映射
   const TASK_STATUS_CLASSES = {
@@ -189,6 +192,61 @@
     processing: "进行中",
     checking: "校验中",
     default: "未知",
+  };
+
+  window.refreshTaskStatistics = async function (taskId) {
+    try {
+      const response = await fetch(`/api/tasks/${taskId}/stats/`);
+      if (!response.ok) {
+        return;
+      }
+
+      const data = await response.json();
+      if (data.status !== "success" || !data.stats) {
+        return;
+      }
+
+      const stats = data.stats;
+      const verifiedCount = Number(stats.verified_count || 0);
+      const unverifiedCount = Number(stats.unverified_count || 0);
+      const totalVerifiableCount = Number(stats.total_verifiable_count || 0);
+      const totalCount = Number(stats.total_count || 0);
+      const verificationProgress = Number(stats.verification_progress || 0);
+
+      const verifiedCountEl = document.getElementById("verified-count");
+      const unverifiedCountEl = document.getElementById("unverified-count");
+      const totalVerifiableCountEl = document.getElementById(
+        "total-verifiable-count",
+      );
+      const verificationProgressBar = document.getElementById(
+        "verification-progress-bar",
+      );
+      const verificationPercentageEl = document.getElementById(
+        "verification-percentage",
+      );
+
+      if (verifiedCountEl) verifiedCountEl.textContent = String(verifiedCount);
+      if (unverifiedCountEl)
+        unverifiedCountEl.textContent = String(unverifiedCount);
+      // 如果当前是未标注或人工标注视图，顶部的“总计”应保持为上传时的固定值，
+      // 因此不由此函数覆盖；其它视图仍然显示动态的 total_verifiable_count
+      if (
+        totalVerifiableCountEl &&
+        !["unlabeled", "manual"].includes(taskViewMode)
+      ) {
+        totalVerifiableCountEl.textContent = String(
+          totalVerifiableCount || totalCount,
+        );
+      }
+      if (verificationProgressBar) {
+        verificationProgressBar.style.width = `${verificationProgress}%`;
+      }
+      if (verificationPercentageEl) {
+        verificationPercentageEl.textContent = `${verificationProgress}%`;
+      }
+    } catch (error) {
+      console.warn("刷新任务统计失败", error);
+    }
   };
 
   // 实时更新处理进度的函数

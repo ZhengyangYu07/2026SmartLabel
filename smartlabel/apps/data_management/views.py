@@ -460,7 +460,33 @@ def submit_task(request):
 
             # 将解压路径保存到 Task 中
             task.extracted_dir = str(extract_dir)
+            # 先保存解压路径
             task.save(update_fields=['extracted_dir'])
+
+            # 统计上传的总数并保存为固定值，后续界面显示该固定数值不随标注变更而改变
+            total_count = 0
+            try:
+                if task.task_type == 'image-classification':
+                    exts = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'}
+                    total_count = sum(1 for p in extract_dir.rglob('*') if p.suffix.lower() in exts)
+                elif task.task_type == 'text-classification':
+                    total_count = 0
+                    for p in extract_dir.rglob('*.csv'):
+                        try:
+                            with open(p, 'r', encoding='utf-8', newline='') as f:
+                                reader = csv.reader(f)
+                                rows = list(reader)
+                                if len(rows) > 1:
+                                    total_count += max(0, len(rows) - 1)
+                        except Exception:
+                            continue
+                else:
+                    total_count = sum(1 for p in extract_dir.rglob('*') if p.is_file() and not p.name.startswith('.'))
+            except Exception:
+                total_count = 0
+
+            task.uploaded_total = total_count
+            task.save(update_fields=['uploaded_total'])
         except OSError as e:
             if lock_acquired and submission_lock_key:
                 cache.delete(submission_lock_key)
@@ -1005,6 +1031,31 @@ def task_detail(request, task_id):
     task.verification_progress = verification_progress # 新增：校验进度
     task.total_count = result_model.objects.filter(**{relation_field: task}).count()
 
+    # 回退逻辑：如果数据库中尚无样本（例如刚提交），尝试根据解压目录估算总数，便于页面初次渲染显示正确的上传数量
+    if task.total_count == 0 and getattr(task, 'extracted_dir', None):
+        try:
+            extract_path = Path(task.extracted_dir)
+            if extract_path.exists():
+                if task.task_type == 'image-classification':
+                    exts = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'}
+                    task.total_count = sum(1 for p in extract_path.rglob('*') if p.suffix.lower() in exts)
+                elif task.task_type == 'text-classification':
+                    cnt = 0
+                    for p in extract_path.rglob('*.csv'):
+                        try:
+                            with open(p, 'r', encoding='utf-8', newline='') as f:
+                                reader = csv.reader(f)
+                                rows = list(reader)
+                                if len(rows) > 1:
+                                    cnt += max(0, len(rows) - 1)
+                        except Exception:
+                            continue
+                    task.total_count = cnt
+                else:
+                    task.total_count = sum(1 for p in extract_path.rglob('*') if p.is_file() and not p.name.startswith('.'))
+        except Exception:
+            task.total_count = result_model.objects.filter(**{relation_field: task}).count()
+
     # 获取所有条目，用于页面渲染和后续处理 (不需要一次性加载所有数据，这里只是为了获取所有可能的标签)
     items = result_model.objects.filter(**{relation_field: task})
 
@@ -1150,8 +1201,8 @@ def rerun_semi_supervised(request, task_id):
     """在人工标注后重新调用半监督流程。"""
     task = get_object_or_404(Task, id=task_id, user=request.user)
 
-    if task.task_type != 'image-classification':
-        return JsonResponse({'status': 'error', 'message': '当前页面仅支持图像分类任务'}, status=400)
+    if task.task_type not in ('image-classification', 'text-classification'):
+        return JsonResponse({'status': 'error', 'message': '当前页面仅支持图像分类或文本分类任务'}, status=400)
 
     try:
         if task.celery_task_id:
@@ -1616,6 +1667,35 @@ def get_task_stats(request, task_id):
 
     stats = _get_label_verification_stats(task, result_model, relation_field)
     total_count = result_model.objects.filter(**{relation_field: task}).count()
+
+    # 如果数据库中尚未写入样本（例如任务刚提交，后台尚未处理），
+    # 则回退到根据上传的解压目录估算总样本数，便于前端立刻显示上传数量。
+    if total_count == 0 and getattr(task, 'extracted_dir', None):
+        try:
+            extract_path = Path(task.extracted_dir)
+            if extract_path.exists():
+                # 图片任务：按常见图片扩展名计数
+                if task.task_type == 'image-classification':
+                    exts = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'}
+                    total_count = sum(1 for p in extract_path.rglob('*') if p.suffix.lower() in exts)
+                elif task.task_type == 'text-classification':
+                    # 文本任务：统计所有 csv 文件的行数（除首行表头）
+                    total_count = 0
+                    for p in extract_path.rglob('*.csv'):
+                        try:
+                            with open(p, 'r', encoding='utf-8', newline='') as f:
+                                reader = csv.reader(f)
+                                rows = list(reader)
+                                if len(rows) > 1:
+                                    total_count += max(0, len(rows) - 1)
+                        except Exception:
+                            continue
+                else:
+                    # 兜底：计数所有文件（排除隐藏）
+                    total_count = sum(1 for p in extract_path.rglob('*') if p.is_file() and not p.name.startswith('.'))
+        except Exception:
+            # 出错时保留原始 total_count（0）
+            total_count = result_model.objects.filter(**{relation_field: task}).count()
 
     total_verifiable = stats.get('total_labeled_count', 0)
     verified = stats.get('verified_count', 0)

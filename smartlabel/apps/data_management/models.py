@@ -37,6 +37,8 @@ class Task(models.Model):
 
     # 数据和模型配置信息
     data_file = models.FileField(upload_to='uploads/data/%Y/%m/%d/', verbose_name="数据文件")
+    # 用户上传数据时统计的固定总数（上传完成后写入，界面显示为常量）
+    uploaded_total = models.PositiveIntegerField(default=0, verbose_name="上传总数")
     label_list = models.JSONField(default=list, blank=True, verbose_name="标签配置")   # 针对预训练模式
     label_file = models.FileField(upload_to='uploads/label/%Y/%m/%d/', blank=True, null=True,
                                   verbose_name="标注文件")  # 半监督模式下必填

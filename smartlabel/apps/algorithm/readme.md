@@ -26,13 +26,14 @@
 ---
 
 ## 二、文本分类算法规范
+
 文本数据主要的输入格式是.txt、.csv或者.json格式，用户在上传文件时直接将相应文件传入即可。
 
 .txt文本格式规范：`"text", label`（文本信息用最外层`""`标识，以逗号分隔数据和标签）  
-如：`"股票市场波动很大", 金融`  
+如：`"股票市场波动很大", 金融`
 
 .json文本格式规范：`{"text": "...", "label": "..."}`  
-如：`{"text": "股票市场波动很大", "label": "金融"}`  
+如：`{"text": "股票市场波动很大", "label": "金融"}`
 
 .csv文本格式规范：`"text", "label"`  
 如：`"股票市场波动很大", "金融"`
@@ -52,5 +53,16 @@
 **test.py（测试函数）：**  
 函数输入：文本数据格式（.txt/.json/.csv） 单条文本数据  
 函数输出：预测置信度 预测标签
+
+### 3. 当前工程的实际执行分流（避免混淆）
+
+- 文本分类 + 预训练：调用 `smartlabel/apps/algorithm/bert/train.py`
+- 文本分类 + 半监督 + 主题分类（topic）：调用 `smartlabel/apps/algorithm/text_classification/train.py`
+- 文本分类 + 半监督 + 其他场景（sentiment/moderation）：调用 `smartlabel/apps/algorithm/text_classification/train.py`
+
+说明：
+
+- 主题分类流程已经切回 `text_classification/train.py` 的 CG3 主链路，输出 `cg3_conf` 作为主置信度。
+- 任务创建后具体走哪条分支，由 `classification_scene`（场景）与 `labeling_type`（预训练/半监督）共同决定。
 
 ---

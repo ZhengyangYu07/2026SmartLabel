@@ -56,7 +56,7 @@
       <div>
         <div class="font-semibold text-gray-800">总计</div>
         <div class="text-xs text-gray-500">
-          共 <span id="total-count">0</span> 条
+          共 {{ task.uploaded_total|default:0 }} 条
         </div>
       </div>
       <button
@@ -251,14 +251,7 @@
     return { results, total_count: serverTotal, total_pages: totalPages };
   }
 
-  // 获取本次任务的全部样本总数（不带 labeled_only 参数）
-  async function fetchTotalDataCount() {
-    const params = new URLSearchParams({ page: "1", page_size: "1" });
-    const resp = await fetch(`/tasks/${taskId}/data/?${params.toString()}`);
-    if (!resp.ok) return 0;
-    const data = await resp.json();
-    return data.total_count || 0;
-  }
+  // 总数使用任务上传时统计的固定值（服务端渲染），无需客户端再请求。
 
   function renderListItem(item) {
     const li = document.createElement("div");
@@ -466,21 +459,11 @@
   async function loadPage(page = 1) {
     try {
       const data = await fetchAllLabeledData();
-      // 同时获取任务总样本数并显示为顶部的总计
-      try {
-        const totalAll = await fetchTotalDataCount();
-        document.getElementById("total-count").textContent =
-          totalAll || data.total_count || allItems.length || 0;
-      } catch (e) {
-        document.getElementById("total-count").textContent =
-          data.total_count || allItems.length || 0;
-      }
+      // 顶部总计为服务端渲染的固定值，不随刷新变化。
       allItems = data.results || [];
       totalPages = data.total_pages || 1;
       currentPage = page;
 
-      document.getElementById("total-count").textContent =
-        data.total_count || allItems.length || 0;
       const listContainer = document.getElementById("item-list");
       listContainer.innerHTML = "";
 

@@ -22,7 +22,8 @@
   class="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800 flex items-center justify-between gap-4"
 >
   <div>
-    左侧列表按不确定性优先排序。当前共有 {{ unlabeled_count|default:0 }}
+    左侧列表按不确定性优先排序。当前共有
+    <span id="manual-unlabeled-count">{{ unlabeled_count|default:0 }}</span>
     条待人工标注样本。保存后会将样本记为人工标注，并在后续重新调用半监督算法时纳入训练。
   </div>
   <button
@@ -266,6 +267,10 @@
     const count = document.getElementById("candidate-count");
     list.innerHTML = "";
     count.textContent = candidateItems.length;
+    const bannerCount = document.getElementById("manual-unlabeled-count");
+    if (bannerCount) {
+      bannerCount.textContent = candidateItems.length;
+    }
 
     if (candidateItems.length === 0) {
       list.innerHTML =
@@ -394,7 +399,11 @@
     }
 
     showToast(data.message || "人工标注已保存", "success");
-    removeCurrentCandidate();
+    // 重新加载候选列表以保证计数与后端一致
+    await initPage();
+    if (window.refreshTaskStatistics) {
+      await window.refreshTaskStatistics(taskId);
+    }
   }
 
   async function rerunSemiSupervised() {

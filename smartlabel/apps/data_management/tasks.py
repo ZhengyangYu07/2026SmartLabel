@@ -163,11 +163,12 @@ def run_subprocess_with_progress(cmd, task_id, total_files=None):
 
         for line in iter(process.stdout.readline, ''):
             stripped_line = line.strip()
-            if stripped_line:
-                _set_algorithm_heartbeat(task_id, stripped_line)
+            safe_line = stripped_line.replace('\ufffd', '?')
+            if safe_line:
+                _set_algorithm_heartbeat(task_id, safe_line)
 
             # --- 优先匹配模式B (百分比) ---
-            match_percent = progress_pattern.search(stripped_line)
+            match_percent = progress_pattern.search(safe_line)
             if match_percent:
                 try:
                     progress = int(match_percent.group(1))
@@ -179,7 +180,7 @@ def run_subprocess_with_progress(cmd, task_id, total_files=None):
                         task_obj.save(update_fields=['progress'])
                         if current_task:
                             current_task.update_state(state='PROGRESS', meta={'progress': progress})
-                        logger.info(f"子进程输出 (进度更新): {stripped_line}") # 仅在更新进度时记录一次
+                        logger.info(f"子进程输出 (进度更新): {safe_line}") # 仅在更新进度时记录一次
                         line_processed_as_progress = True # 标记此行已用于进度更新
                 except (ValueError, TypeError) as e:
                     logger.error(f"解析进度百分比时出错: {str(e)}")
@@ -187,7 +188,7 @@ def run_subprocess_with_progress(cmd, task_id, total_files=None):
 
             # --- 如果模式B未匹配，且 total_files 有效，则尝试模式A (文件计数) ---
             if total_files and total_files > 0:
-                match_file = file_progress_pattern.search(stripped_line)
+                match_file = file_progress_pattern.search(safe_line)
                 if match_file:
                     processed_files += 1
                     progress = int((processed_files / total_files) * 100)
@@ -199,13 +200,13 @@ def run_subprocess_with_progress(cmd, task_id, total_files=None):
                         task_obj.save(update_fields=['progress'])
                         if current_task:
                             current_task.update_state(state='PROGRESS', meta={'progress': progress})
-                        logger.info(f"子进程输出 (文件计数更新): {stripped_line}") # 仅在更新进度时记录一次
+                        logger.info(f"子进程输出 (文件计数更新): {safe_line}") # 仅在更新进度时记录一次
                         line_processed_as_progress = True # 标记此行已用于进度更新
                     continue # 匹配到文件后，不再进行其他模式匹配
                     
             # 如果以上两种进度模式都未匹配，则按通用信息记录一次
             if not line_processed_as_progress:
-                logger.info(f"子进程输出: {stripped_line}") 
+                logger.info(f"子进程输出: {safe_line}") 
             line_processed_as_progress = False # 重置标志，为下一行准备
 
         return_code = process.wait()
@@ -769,30 +770,36 @@ def process_annotation_task(self, task_id):
                 embedding_dir = result_dir / "embeddings"
                 embedding_dir.mkdir(parents=True, exist_ok=True)
 
+                # 主动学习冷启动要求：至少要有一个人工标注样本，否则模型无法形成有效类别覆盖
+                labeled_label_count = int(combined_df.loc[combined_df['is_labeled'] == True, 'label'].nunique())
+                if labeled_label_count == 0:
+                    raise ValueError("主题分类任务至少需要 1 个已人工标注类别样本，才能启动训练与主动学习流程。")
+
                 # 根据场景选择不同的算法
                 if classification_scene == 'topic':
-                    # 主题分类使用 FlexMatch 半监督算法
-                    logger.info("主题分类任务，调用 FlexMatch 算法")
+                    # 主题分类优先使用 CG3 闭集分类，便于输出更稳定的置信度和不确定性
+                    logger.info("主题分类任务，调用 flexmatch CG3 基础文本分类算法")
                     
                     config = {
                         "dataset_path": str(combined_data_file),
+                        "dataset_format": "csv",
+                        "classification_scene": classification_scene,
+                        "embedding_save_path": str(embedding_dir),
                         "output_path": str(result_dir),
                         "language": "zh",
                         "bert_model": "hfl/chinese-roberta-wwm-ext",
                         "batch_size": 32,
                         "device": "cuda" if torch.cuda.is_available() else "cpu",
-                        "epochs": 200,
-                        "num_train_iter": 1024,
-                        "ema_m": 0.999,
-                        "T": 0.5,
-                        "p_cutoff": 0.95,
-                        "ulb_loss_ratio": 1.0,
-                        "hard_label": True,
-                        "num_eval_iter": 1000,
-                        "optim": "sgd",
-                        "lr": 0.03,
-                        "momentum": 0.9,
-                        "weight_decay": 5e-4,
+                        "cg3_use": True,
+                        "cg3_epochs": 200,
+                        "cg3_lr": 0.001,
+                        "cg3_k": 15,
+                        "cg3_threshold": 0.7,
+                        "cg3_sigma": 0.5,
+                        "cg3_warmup": 10,
+                        "llgc_use": False,
+                        "manifold_use": False,
+                        "mixtext_use": False,
                     }
                     with open(config_path, 'w', encoding='utf-8') as f:
                         json.dump(config, f, ensure_ascii=False, indent=4)
@@ -800,13 +807,14 @@ def process_annotation_task(self, task_id):
                     logger.info(f"配置文件已保存到: {config_path}")
                     _update_task_progress(task, 25, self)
 
-                    # 调用 FlexMatch 脚本用于主题分类
-                    algorithm_script_path = Path(settings.BASE_DIR) / 'smartlabel' / 'apps' / 'algorithm' / 'TorchSSL-main' / 'flexmatch_text.py'
-                    cmd = ['python', str(algorithm_script_path), '--config', str(config_path)]
+                    # 调用 flexmatch 主题分类脚本
+                    algorithm_script_path = Path(settings.BASE_DIR) / 'smartlabel' / 'apps' / 'algorithm' / 'flexmatch' / 'train.py'
+                    cmd = ['conda', 'run', '--no-capture-output', '-n', 'text_classification', 'python', str(algorithm_script_path), '--config', str(config_path)]
 
-                else:
-                    # 其他场景使用集成算法（情感分析、内容审核等）
-                    logger.info("文本分类任务，调用集成算法（CG3+LLGC+ManifoldClassifier+MixText）")
+                elif classification_scene in ['sentiment', 'moderation']:
+                    # 情感分析和内容审核使用 text_classification 集成算法
+                    scene_name = '情感分析' if classification_scene == 'sentiment' else '内容审核'
+                    logger.info(f"{scene_name}任务，调用 text_classification 集成算法（CG3+LLGC+ManifoldClassifier+MixText）")
                     
                     config = {
                         "dataset_path": str(combined_data_file),
@@ -844,9 +852,12 @@ def process_annotation_task(self, task_id):
                     logger.info(f"配置文件已保存到: {config_path}")
                     _update_task_progress(task, 25, self)
 
-                    # 调用集成算法脚本
+                    # 调用 text_classification 集成算法脚本
                     algorithm_script_path = Path(settings.BASE_DIR) / 'smartlabel' / 'apps' / 'algorithm' / 'text_classification' / 'train.py'
                     cmd = ['conda', 'run', '--no-capture-output', '-n', 'text_classification', 'python', str(algorithm_script_path), '--config', str(config_path)]
+
+                else:
+                    raise ValueError(f"未知的分类场景: {classification_scene}")
 
                 logger.info(f"执行命令: {' '.join(shlex.quote(s) for s in cmd)}")
                 _update_task_progress(task, 30, self)
