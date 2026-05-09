@@ -1,8 +1,23 @@
 import os
+from pathlib import Path
 import torch
 from transformers import AutoTokenizer, AutoModel
 from tqdm import tqdm
 import torch.nn.functional as F 
+
+
+DEFAULT_BERT_MODEL_DIR = Path(os.environ.get(
+    'SMARTLABEL_TEXT_CLASSIFICATION_BERT_MODEL',
+    str(Path(__file__).resolve().parents[5] / 'models' / 'chinese-roberta-wwm-ext'),
+))
+
+
+def _resolve_bert_model_path(model_name_or_path):
+    if model_name_or_path and Path(model_name_or_path).exists():
+        return model_name_or_path
+    if DEFAULT_BERT_MODEL_DIR.exists():
+        return str(DEFAULT_BERT_MODEL_DIR)
+    return model_name_or_path
 
 
 def _resolve_device(device_pref):
@@ -14,8 +29,9 @@ def _resolve_device(device_pref):
 class TextBERTEncoder:
     def __init__(self, config, dim, device="cuda",  pooling_type="cls"):
         self.device = _resolve_device(device)
-        self.tokenizer = AutoTokenizer.from_pretrained(config["bert_model"])
-        self.model = AutoModel.from_pretrained(config["bert_model"]).to(self.device)
+        bert_model_path = _resolve_bert_model_path(config["bert_model"])
+        self.tokenizer = AutoTokenizer.from_pretrained(bert_model_path)
+        self.model = AutoModel.from_pretrained(bert_model_path).to(self.device)
         self.out_dim = dim
         self.pooling_type = pooling_type
 

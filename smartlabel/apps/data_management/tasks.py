@@ -25,6 +25,16 @@ from .models import Task
 
 MIN_UPDATE_INTERVAL = 0.5
 logger = logging.getLogger(__name__)
+DEFAULT_TEXT_CLASSIFICATION_BERT_MODEL = Path(os.environ.get(
+    'SMARTLABEL_TEXT_CLASSIFICATION_BERT_MODEL',
+    str(Path(settings.BASE_DIR) / 'models' / 'chinese-roberta-wwm-ext'),
+))
+
+
+def _resolve_text_classification_bert_model():
+    if DEFAULT_TEXT_CLASSIFICATION_BERT_MODEL.exists():
+        return str(DEFAULT_TEXT_CLASSIFICATION_BERT_MODEL)
+    return 'hfl/chinese-roberta-wwm-ext'
 
 
 def _heartbeat_cache_key(task_id):
@@ -385,15 +395,8 @@ def _process_common_pretrained_task(self, task_id, task, update_progress, result
 
         logger.info(f"总计找到 {total_input_items} 条文本数据待处理。")
 
-        # 所有文本分类场景都使用 BERT
-        classification_scene = getattr(task, 'classification_scene', '') or ''
-        if classification_scene == 'sentiment':
-            if not task.label_list:
-                task.label_list = ['正面', '负面', '中性']
-                task.save(update_fields=['label_list'])
-            label_choices = list(task.label_list or ['正面', '负面', '中性'])
-        else:
-            label_choices = []
+        # 预训练模式下，不再根据分类场景设置标签列表
+        label_choices = []
         
         config = {
             "text_input_dir": str(extract_dir),
@@ -668,7 +671,6 @@ def process_annotation_task(self, task_id):
 
         # ==================== 文本分类逻辑 ====================
         elif task.task_type == 'text-classification':
-            classification_scene = getattr(task, 'classification_scene', '') or ''
             unlabeled_files = list(extract_dir.glob('*.csv'))
             if not unlabeled_files:
                 raise FileNotFoundError(f"数据压缩包解压后，在目录 {extract_dir} 中未找到任何 .csv 文件。")
@@ -773,91 +775,41 @@ def process_annotation_task(self, task_id):
                 # 主动学习冷启动要求：至少要有一个人工标注样本，否则模型无法形成有效类别覆盖
                 labeled_label_count = int(combined_df.loc[combined_df['is_labeled'] == True, 'label'].nunique())
                 if labeled_label_count == 0:
-                    raise ValueError("主题分类任务至少需要 1 个已人工标注类别样本，才能启动训练与主动学习流程。")
+                    raise ValueError("文本分类任务至少需要 1 个已人工标注类别样本，才能启动训练与主动学习流程。")
 
-                # 根据场景选择不同的算法
-                if classification_scene == 'topic':
-                    # 主题分类优先使用 CG3 闭集分类，便于输出更稳定的置信度和不确定性
-                    logger.info("主题分类任务，调用 flexmatch CG3 基础文本分类算法")
-                    
-                    config = {
-                        "dataset_path": str(combined_data_file),
-                        "dataset_format": "csv",
-                        "classification_scene": classification_scene,
-                        "embedding_save_path": str(embedding_dir),
-                        "output_path": str(result_dir),
-                        "language": "zh",
-                        "bert_model": "hfl/chinese-roberta-wwm-ext",
-                        "batch_size": 32,
-                        "device": "cuda" if torch.cuda.is_available() else "cpu",
-                        "cg3_use": True,
-                        "cg3_epochs": 200,
-                        "cg3_lr": 0.001,
-                        "cg3_k": 15,
-                        "cg3_threshold": 0.7,
-                        "cg3_sigma": 0.5,
-                        "cg3_warmup": 10,
-                        "llgc_use": False,
-                        "manifold_use": False,
-                        "mixtext_use": False,
-                    }
-                    with open(config_path, 'w', encoding='utf-8') as f:
-                        json.dump(config, f, ensure_ascii=False, indent=4)
+                # 所有文本分类任务现在统一使用 CG3 闭集分类算法（原主题分类逻辑）
+                logger.info("文本分类任务，调用 flexmatch CG3 基础文本分类算法")
+                
+                config = {
+                    "dataset_path": str(combined_data_file),
+                    "dataset_format": "csv",
+                    "classification_scene": "topic",
+                    "embedding_save_path": str(embedding_dir),
+                    "output_path": str(result_dir),
+                    "language": "zh",
+                    "bert_model": _resolve_text_classification_bert_model(),
+                    "batch_size": 32,
+                    "device": "cuda" if torch.cuda.is_available() else "cpu",
+                    "cg3_use": True,
+                    "cg3_epochs": 200,
+                    "cg3_lr": 0.001,
+                    "cg3_k": 15,
+                    "cg3_threshold": 0.7,
+                    "cg3_sigma": 0.5,
+                    "cg3_warmup": 10,
+                    "llgc_use": False,
+                    "manifold_use": False,
+                    "mixtext_use": False,
+                }
+                with open(config_path, 'w', encoding='utf-8') as f:
+                    json.dump(config, f, ensure_ascii=False, indent=4)
 
-                    logger.info(f"配置文件已保存到: {config_path}")
-                    _update_task_progress(task, 25, self)
+                logger.info(f"配置文件已保存到: {config_path}")
+                _update_task_progress(task, 25, self)
 
-                    # 调用 flexmatch 主题分类脚本
-                    algorithm_script_path = Path(settings.BASE_DIR) / 'smartlabel' / 'apps' / 'algorithm' / 'flexmatch' / 'train.py'
-                    cmd = ['conda', 'run', '--no-capture-output', '-n', 'text_classification', 'python', str(algorithm_script_path), '--config', str(config_path)]
-
-                elif classification_scene in ['sentiment', 'moderation']:
-                    # 情感分析和内容审核使用 text_classification 集成算法
-                    scene_name = '情感分析' if classification_scene == 'sentiment' else '内容审核'
-                    logger.info(f"{scene_name}任务，调用 text_classification 集成算法（CG3+LLGC+ManifoldClassifier+MixText）")
-                    
-                    config = {
-                        "dataset_path": str(combined_data_file),
-                        "dataset_format": "csv",
-                        "embedding_save_path": str(embedding_dir),
-                        "output_path": str(result_dir),
-                        "language": "zh",
-                        "bert_model": "hfl/chinese-roberta-wwm-ext",
-                        "batch_size": 32,
-                        "device": "cuda" if torch.cuda.is_available() else "cpu",
-                        "cg3_use": True,
-                        "cg3_epochs": 200,
-                        "cg3_lr": 0.001,
-                        "cg3_k": 15,
-                        "cg3_threshold": 0.7,
-                        "cg3_sigma": 0.5,
-                        "cg3_warmup": 10,
-                        "llgc_use": True,
-                        "llgc_alpha": 0.99,
-                        "manifold_use": True,
-                        "manifold_epochs": 400,
-                        "manifold_k": 10,
-                        "manifold_sigma": 0.5,
-                        "manifold_components": 64,
-                        "manifold_lr": 0.001,
-                        "manifold_landmarks": 1000,
-                        "mixtext_use": True,
-                        "mixtext_epochs": 100,
-                        "mixtext_lr": 0.001,
-                        "mixtext_alpha": 0.4
-                    }
-                    with open(config_path, 'w', encoding='utf-8') as f:
-                        json.dump(config, f, ensure_ascii=False, indent=4)
-
-                    logger.info(f"配置文件已保存到: {config_path}")
-                    _update_task_progress(task, 25, self)
-
-                    # 调用 text_classification 集成算法脚本
-                    algorithm_script_path = Path(settings.BASE_DIR) / 'smartlabel' / 'apps' / 'algorithm' / 'text_classification' / 'train.py'
-                    cmd = ['conda', 'run', '--no-capture-output', '-n', 'text_classification', 'python', str(algorithm_script_path), '--config', str(config_path)]
-
-                else:
-                    raise ValueError(f"未知的分类场景: {classification_scene}")
+                # 调用 flexmatch 文本分类脚本
+                algorithm_script_path = Path(settings.BASE_DIR) / 'smartlabel' / 'apps' / 'algorithm' / 'flexmatch' / 'train.py'
+                cmd = ['conda', 'run', '--no-capture-output', '-n', 'text_classification', 'python', str(algorithm_script_path), '--config', str(config_path)]
 
                 logger.info(f"执行命令: {' '.join(shlex.quote(s) for s in cmd)}")
                 _update_task_progress(task, 30, self)

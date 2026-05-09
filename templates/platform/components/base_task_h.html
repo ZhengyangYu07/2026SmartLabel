@@ -54,6 +54,14 @@
         >
           已标注
         </a>
+        {% if task.task_type == 'text-classification' %}
+        <a
+          href="{% url 'manual_annotation' task.id %}"
+          class="inline-flex items-center px-4 py-2 rounded-full border border-white/30 transition-colors {% if task_view_mode == 'unlabeled' or task_view_mode == 'manual' %}bg-white text-purple-900 font-semibold{% else %}bg-white/10 text-white hover:bg-white/20{% endif %}"
+        >
+          未标注
+        </a>
+        {% else %}
         <a
           href="{% url 'unlabeled_detail' task.id %}"
           class="inline-flex items-center px-4 py-2 rounded-full border border-white/30 transition-colors {% if task_view_mode == 'unlabeled' %}bg-white text-purple-900 font-semibold{% else %}bg-white/10 text-white hover:bg-white/20{% endif %}"
@@ -66,6 +74,7 @@
         >
           人工标注
         </a>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -126,9 +135,11 @@
       <div class="flex flex-col">
         <dt class="text-gray-600">总计</dt>
         <dd id="total-verifiable-count" class="font-medium">
-          {% if task_view_mode == 'unlabeled' or task_view_mode == 'manual' %}
-          {{ task.uploaded_total|default:"0" }} {% else %} {{
-          task.total_count|default:"0" }} {% endif %}
+          {% if task.task_type == 'text-classification' and task_view_mode == 'labeled' %} 
+          {{ task.manual_annotated_count|default:"0" }} 
+          {% elif task.task_type == 'text-classification' and task_view_mode == 'manual'%} 
+          {{ unlabeled_count|default:"0" }} {% elif task_view_mode == 'unlabeled' %}
+          {{ task.uploaded_total|default:"0" }} {% else %} {{task.total_count|default:"0" }} {% endif %}
         </dd>
       </div>
       <div class="flex flex-col">

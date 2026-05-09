@@ -38,14 +38,14 @@
 
 <div
   id="image-modal"
-  class="hidden fixed inset-0 z-[200] bg-black/80 items-center justify-center p-6"
+  class="hidden fixed inset-0 z-[200] bg-black/80 items-center justify-center p-2 md:p-4"
   onclick="closeModal(event)"
 >
   <img
     id="modal-image"
     src=""
     alt="预览"
-    class="max-w-[90vw] max-h-[90vh] object-contain rounded-lg"
+    class="w-[85vw] h-[80vh] max-w-[1200px] object-contain rounded-lg"
   />
 </div>
 {% endblock %} {% block js %} {{ block.super }}
@@ -65,13 +65,18 @@
   }
 
   function closeModal(event) {
-    if (event.target.id !== "image-modal") {
-      return;
-    }
     const modal = document.getElementById("image-modal");
+    if (!modal) return;
     modal.classList.add("hidden");
     modal.classList.remove("flex");
   }
+
+  // allow closing with Esc key
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") {
+      closeModal();
+    }
+  });
 
   function formatScore(v) {
     const n = Number(v);

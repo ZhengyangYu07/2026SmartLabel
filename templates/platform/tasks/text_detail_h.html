@@ -56,7 +56,7 @@
       <div>
         <div class="font-semibold text-gray-800">总计</div>
         <div class="text-xs text-gray-500">
-          共 {{ task.uploaded_total|default:0 }} 条
+          共 {{ task.manual_annotated_count|default:"0" }} 条
         </div>
       </div>
       <button

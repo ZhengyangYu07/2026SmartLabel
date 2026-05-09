@@ -8,6 +8,7 @@ import torch.nn.functional as F
 import pandas as pd
 import argparse
 import sys # 引入 sys 模块用于刷新输出
+from pathlib import Path
 
 from utils.data_utils import encode_labels, get_mask
 from utils.encoder import TextBERTEncoder
@@ -18,6 +19,20 @@ from model.LLGC import llgc_predict
 from model.ManifoldClassifier import ManifoldClassifier
 from model.MixTextClassifier import MixTextClassifier, mixup_data
 from transformers import AutoConfig
+
+
+DEFAULT_BERT_MODEL_DIR = Path(os.environ.get(
+    'SMARTLABEL_TEXT_CLASSIFICATION_BERT_MODEL',
+    str(Path(__file__).resolve().parents[5] / 'models' / 'chinese-roberta-wwm-ext'),
+))
+
+
+def _resolve_bert_model_path(model_name_or_path):
+    if model_name_or_path and Path(model_name_or_path).exists():
+        return model_name_or_path
+    if DEFAULT_BERT_MODEL_DIR.exists():
+        return str(DEFAULT_BERT_MODEL_DIR)
+    return model_name_or_path
 
 
 def _resolve_device(device_pref):
@@ -105,7 +120,7 @@ def run_training(config_path):
     batch_size = config.get("batch_size", 32)
     embedding_dir = config.get("embedding_save_path", "embeddings/")
     os.makedirs(embedding_dir, exist_ok=True)
-    bert_cfg = AutoConfig.from_pretrained(config["bert_model"])
+    bert_cfg = AutoConfig.from_pretrained(_resolve_bert_model_path(config["bert_model"]))
     embedding_dim = bert_cfg.hidden_size
 
     # Step 1: Load & encode

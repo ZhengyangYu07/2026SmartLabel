@@ -1,835 +1,975 @@
-{% extends 'platform/components/base_task.html' %}
-{% load static %}
-
-{% block task_details %}
-    <link rel="stylesheet" href="{% static 'css/image_detail.css' %}">
-{% endblock %}
-
-{% block task_table %}
+{% extends 'platform/components/base_task.html' %} {% load static %} {% block task_details %}
+<link rel="stylesheet" href="{% static 'css/image_detail.css' %}" />
+{% endblock %} {% block task_table %}
 <!-- 为表格添加一个容器，以防未来需求变化，可以添加溢出滚动 -->
 <div class="overflow-x-auto">
-    <table style="margin-top: 10px">
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>文件名</th>
-                <th>内容</th>
-                <th>
-                    <div class="custom-select" id="filter-label"> {# 增加ID，方便JS选中 #}
-                        <div class="select-header" onclick="toggleDropdown('label')">
-                            <span class="t-span">预测标签</span>
-                            <svg class="t-svg" width="12" height="12" viewBox="0 0 24 24">
-                                <path d="M7 10l5 5 5-5z" />
-                            </svg>
-                        </div>
-                        <div class="options-wrapper">
-                            <!-- 重置排序选项 -->
-                            <div class="option-item sort-option" onclick="resetSort()">
-                                <span>↺ 重置排序 (按ID)</span>
-                            </div>
-                            <!-- 排序选项 -->
-                            <div class="option-item sort-option" onclick="handleSort('label', 'asc')">
-                                <span>↑ 标签 (A-Z)</span>
-                            </div>
-                            <div class="option-item sort-option" onclick="handleSort('label', 'desc')">
-                                <span>↓ 标签 (Z-A)</span>
-                            </div>
-                            <!-- 新增：重置筛选选项 -->
-                            <div class="option-item reset-filter-option" onclick="resetFilter('label')">
-                                <span>⊗ 重置筛选</span>
-                            </div>
+  <table style="margin-top: 10px">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>文件名</th>
+        <th>内容</th>
+        <th>
+          <div class="custom-select" id="filter-label">
+            {# 增加ID，方便JS选中 #}
+            <div class="select-header" onclick="toggleDropdown('label')">
+              <span class="t-span">预测标签</span>
+              <svg class="t-svg" width="12" height="12" viewBox="0 0 24 24">
+                <path d="M7 10l5 5 5-5z" />
+              </svg>
+            </div>
+            <div class="options-wrapper">
+              <!-- 重置排序选项 -->
+              <div class="option-item sort-option" onclick="resetSort()">
+                <span>↺ 重置排序 (按ID)</span>
+              </div>
+              <!-- 排序选项 -->
+              <div
+                class="option-item sort-option"
+                onclick="handleSort('label', 'asc')"
+              >
+                <span>↑ 标签 (A-Z)</span>
+              </div>
+              <div
+                class="option-item sort-option"
+                onclick="handleSort('label', 'desc')"
+              >
+                <span>↓ 标签 (Z-A)</span>
+              </div>
+              <!-- 新增：重置筛选选项 -->
+              <div
+                class="option-item reset-filter-option"
+                onclick="resetFilter('label')"
+              >
+                <span>⊗ 重置筛选</span>
+              </div>
 
-                            <!-- 筛选选项 -->
-                            <div class="search-box">
-                                <input type="text" placeholder="搜索标签..." oninput="filterOptions('label', this.value)">
-                            </div>
-                            <div id="label-options">
-                                <!-- 动态生成选项 -->
-                            </div>
-                            <button onclick="applyFilters()"
-                                style="width: 100%; padding: 5px; margin-top: 5px; background-color: #3b82f6; color: white; border: none; cursor: pointer;">应用</button>
-                        </div>
-                    </div>
-                </th>
-                <th>
-                    <div class="custom-select" id="filter-confidence"> {# 增加ID，方便JS选中 #}
-                        <div class="select-header" onclick="toggleDropdown('confidence')">
-                            <span class="t-span">置信度</span>
-                            <svg class="t-svg" width="12" height="12" viewBox="0 0 24 24">
-                                <path d="M7 10l5 5 5-5z" />
-                            </svg>
-                        </div>
-                        <div class="options-wrapper">
-                            <!-- 重置排序选项 -->
-                            <div class="option-item sort-option" onclick="resetSort()">
-                                <span>↺ 重置排序 (按ID)</span>
-                            </div>
-                            <!-- 排序选项 -->
-                            <div class="option-item sort-option" onclick="handleSort('confidence', 'desc')">
-                                <span>置信度↓</span>
-                            </div>
-                            <div class="option-item sort-option" onclick="handleSort('confidence', 'asc')">
-                                <span>置信度↑</span>
-                            </div>
-                            <!-- 新增：重置筛选选项 -->
-                            <div class="option-item reset-filter-option" onclick="resetFilter('confidence')">
-                                <span>⊗ 重置筛选</span>
-                            </div>
+              <!-- 筛选选项 -->
+              <div class="search-box">
+                <input
+                  type="text"
+                  placeholder="搜索标签..."
+                  oninput="filterOptions('label', this.value)"
+                />
+              </div>
+              <div id="label-options">
+                <!-- 动态生成选项 -->
+              </div>
+              <button
+                onclick="applyFilters()"
+                style="
+                  width: 100%;
+                  padding: 5px;
+                  margin-top: 5px;
+                  background-color: #3b82f6;
+                  color: white;
+                  border: none;
+                  cursor: pointer;
+                "
+              >
+                应用
+              </button>
+            </div>
+          </div>
+        </th>
+        <th>
+          <div class="custom-select" id="filter-confidence">
+            {# 增加ID，方便JS选中 #}
+            <div class="select-header" onclick="toggleDropdown('confidence')">
+              <span class="t-span">置信度</span>
+              <svg class="t-svg" width="12" height="12" viewBox="0 0 24 24">
+                <path d="M7 10l5 5 5-5z" />
+              </svg>
+            </div>
+            <div class="options-wrapper">
+              <!-- 重置排序选项 -->
+              <div class="option-item sort-option" onclick="resetSort()">
+                <span>↺ 重置排序 (按ID)</span>
+              </div>
+              <!-- 排序选项 -->
+              <div
+                class="option-item sort-option"
+                onclick="handleSort('confidence', 'desc')"
+              >
+                <span>置信度↓</span>
+              </div>
+              <div
+                class="option-item sort-option"
+                onclick="handleSort('confidence', 'asc')"
+              >
+                <span>置信度↑</span>
+              </div>
+              <!-- 新增：重置筛选选项 -->
+              <div
+                class="option-item reset-filter-option"
+                onclick="resetFilter('confidence')"
+              >
+                <span>⊗ 重置筛选</span>
+              </div>
 
-                            <!-- 筛选选项 -->
-                            <div class="search-box">
-                                <input type="text" placeholder="搜索置信度..."
-                                    oninput="filterOptions('confidence', this.value)">
-                            </div>
-                            <div id="confidence-options">
-                                <!-- 动态生成选项 -->
-                            </div>
-                            <button onclick="applyFilters()"
-                                style="width: 100%; padding: 5px; margin-top: 5px; background-color: #3b82f6; color: white; border: none; cursor: pointer;">应用</button>
-                        </div>
-                    </div>
-                </th>
-                <th>
-                    <div class="custom-select" id="filter-status"> {# 增加ID，方便JS选中 #}
-                        <div class="select-header" onclick="toggleDropdown('status')">
-                            <span class="t-span">状态</span> {# 允许换行 #}
-                            <svg class="t-svg" width="12" height="12" viewBox="0 0 24 24">
-                                <path d="M7 10l5 5 5-5z" />
-                            </svg>
-                        </div>
-                        <div class="options-wrapper">
-                            <!-- 重置排序选项 -->
-                            <div class="option-item sort-option" onclick="resetSort()">
-                                <span>↺ 重置排序 (按ID)</span>
-                            </div>
-                            <!-- 排序选项 -->
-                            <div class="option-item sort-option" onclick="handleSort('status', 'asc')">
-                                <span>状态↓(已校验>未校验>已标注)</span>
-                            </div>
-                            <div class="option-item sort-option" onclick="handleSort('status', 'desc')">
-                                <span>状态↑(已标注>未校验>已校验)</span>
-                            </div>
-                            <!-- 新增：重置筛选选项 -->
-                            <div class="option-item reset-filter-option" onclick="resetFilter('status')">
-                                <span>⊗ 重置筛选</span>
-                            </div>
+              <!-- 筛选选项 -->
+              <div class="search-box">
+                <input
+                  type="text"
+                  placeholder="搜索置信度..."
+                  oninput="filterOptions('confidence', this.value)"
+                />
+              </div>
+              <div id="confidence-options">
+                <!-- 动态生成选项 -->
+              </div>
+              <button
+                onclick="applyFilters()"
+                style="
+                  width: 100%;
+                  padding: 5px;
+                  margin-top: 5px;
+                  background-color: #3b82f6;
+                  color: white;
+                  border: none;
+                  cursor: pointer;
+                "
+              >
+                应用
+              </button>
+            </div>
+          </div>
+        </th>
+        <th>
+          <div class="custom-select" id="filter-status">
+            {# 增加ID，方便JS选中 #}
+            <div class="select-header" onclick="toggleDropdown('status')">
+              <span class="t-span">状态</span> {# 允许换行 #}
+              <svg class="t-svg" width="12" height="12" viewBox="0 0 24 24">
+                <path d="M7 10l5 5 5-5z" />
+              </svg>
+            </div>
+            <div class="options-wrapper">
+              <!-- 重置排序选项 -->
+              <div class="option-item sort-option" onclick="resetSort()">
+                <span>↺ 重置排序 (按ID)</span>
+              </div>
+              <!-- 排序选项 -->
+              <div
+                class="option-item sort-option"
+                onclick="handleSort('status', 'asc')"
+              >
+                <span>状态↓(已校验>未校验>已标注)</span>
+              </div>
+              <div
+                class="option-item sort-option"
+                onclick="handleSort('status', 'desc')"
+              >
+                <span>状态↑(已标注>未校验>已校验)</span>
+              </div>
+              <!-- 新增：重置筛选选项 -->
+              <div
+                class="option-item reset-filter-option"
+                onclick="resetFilter('status')"
+              >
+                <span>⊗ 重置筛选</span>
+              </div>
 
-                            <!-- 筛选选项 -->
-                            <div class="search-box">
-                                <input type="text" placeholder="搜索状态..." oninput="filterOptions('status', this.value)">
-                            </div>
-                            <div id="status-options">
-                                <!-- 动态生成选项 -->
-                            </div>
-                            <button onclick="applyFilters()"
-                                style="width: 100%; padding: 5px; margin-top: 5px; background-color: #3b82f6; color: white; border: none; cursor: pointer;">应用</button>
-                        </div>
-                    </div>
-                </th>
-                <th>
-                    <p>操作</p>
-                </th>
-            </tr>
-        </thead>
-        <tbody>
-            {# 数据将由 JavaScript 渲染 #}
-        </tbody>
-    </table>
+              <!-- 筛选选项 -->
+              <div class="search-box">
+                <input
+                  type="text"
+                  placeholder="搜索状态..."
+                  oninput="filterOptions('status', this.value)"
+                />
+              </div>
+              <div id="status-options">
+                <!-- 动态生成选项 -->
+              </div>
+              <button
+                onclick="applyFilters()"
+                style="
+                  width: 100%;
+                  padding: 5px;
+                  margin-top: 5px;
+                  background-color: #3b82f6;
+                  color: white;
+                  border: none;
+                  cursor: pointer;
+                "
+              >
+                应用
+              </button>
+            </div>
+          </div>
+        </th>
+        <th>
+          <p>操作</p>
+        </th>
+      </tr>
+    </thead>
+    <tbody>
+      {# 数据将由 JavaScript 渲染 #}
+    </tbody>
+  </table>
 </div>
 
 <!-- 模态框（用于显示原始图片） -->
-<div id="image-modal" class="modal" style="display: none;">
-    <div class="modal-content">
-        <span class="close" onclick="closeModal()">&times;</span>
-        <img id="modal-image" src="" alt="Original Image">
-    </div>
+<div id="image-modal" class="modal" style="display: none">
+  <div class="modal-content">
+    <span class="close" onclick="closeModal()">&times;</span>
+    <img id="modal-image" src="" alt="Original Image" />
+  </div>
 </div>
 
 <!-- 智能去噪提示框（处理中） -->
-<div id="denoise-processing-modal" class="modal" style="display: none;">
-    <div class="modal-content denoise-specific-content">
-        <h3>智能去噪</h3>
-        <p id="denoise-processing-text">正在处理中...</p>
-        <div class="loading active">
-            <div class="loading-spinner"></div>
-        </div>
-        {# 两个按钮都改为隐藏模态框，实际逻辑在 confirm-denoise-btn / cancel-denoise-btn #}
-        <div class="flex gap-2 mt-4">
-            <button id="denoise-processing-confirm-btn" onclick="hideDenoiseProcessingModal()" disabled style="display: none;">确定</button>
-            <button id="denoise-processing-cancel-btn" onclick="hideDenoiseProcessingModal()" style="display: none;">取消</button>
-        </div>
+<div id="denoise-processing-modal" class="modal" style="display: none">
+  <div class="modal-content denoise-specific-content">
+    <h3>智能去噪</h3>
+    <p id="denoise-processing-text">正在处理中...</p>
+    <div class="loading active">
+      <div class="loading-spinner"></div>
     </div>
+    {# 两个按钮都改为隐藏模态框，实际逻辑在 confirm-denoise-btn /
+    cancel-denoise-btn #}
+    <div class="flex gap-2 mt-4">
+      <button
+        id="denoise-processing-confirm-btn"
+        onclick="hideDenoiseProcessingModal()"
+        disabled
+        style="display: none"
+      >
+        确定
+      </button>
+      <button
+        id="denoise-processing-cancel-btn"
+        onclick="hideDenoiseProcessingModal()"
+        style="display: none"
+      >
+        取消
+      </button>
+    </div>
+  </div>
 </div>
 
 <script>
-    // 筛选和排序的全局状态
-    let activeFilters = {
-        label: new Set(),
-        confidence: new Set(),
-        status: new Set()
-    };
-    let activeSort = { column: null, order: null };
-    let currentPage = 1;
-    let totalPages = 1;
-    let pageSize = 10; // 每页显示的条目数，与后端task_data的默认值保持一致
+  // 筛选和排序的全局状态
+  let activeFilters = {
+    label: new Set(),
+    confidence: new Set(),
+    status: new Set(),
+  };
+  let activeSort = { column: null, order: null };
+  let currentPage = 1;
+  let totalPages = 1;
+  let pageSize = 10; // 每页显示的条目数，与后端task_data的默认值保持一致
 
-    // 从 URL 获取 task_id
-    const task_id = "{{ task.id }}";
+  // 从 URL 获取 task_id
+  const task_id = "{{ task.id }}";
 
-    // 存储所有可能的标签、置信度和状态值，以便在筛选器中显示完整选项
-    let allPossibleLabels = new Set();
-    let allPossibleConfidences = new Set();
-    // 明确定义所有可能的状态，并提供一个映射关系供前端和后端交互使用
-    // 和后端 STATUS_MAP_FRONTEND_TO_DB 保持一致
-    const ALL_STATUSES_CN = ['已校验', '未校验', '已标注'];
-    const STATUS_MAP_CN_TO_EN = {
-        '已校验': 'verified',
-        '未校验': 'unverified',
-        '已标注': 'manual_annotation_flag', // 仅用于表示该类型，实际查询是 confidence=-1
-    };
-    const STATUS_MAP_EN_TO_CN = {
-        'verified': '已校验',
-        'unverified': '未校验',
-        'manual_annotation_flag': '已标注' // 对应后端 confidence=-1
-    };
-    let allPossibleStatuses = new Set(ALL_STATUSES_CN); // 明确定义所有可能的状态
+  // 存储所有可能的标签、置信度和状态值，以便在筛选器中显示完整选项
+  let allPossibleLabels = new Set();
+  let allPossibleConfidences = new Set();
+  // 明确定义所有可能的状态，并提供一个映射关系供前端和后端交互使用
+  // 和后端 STATUS_MAP_FRONTEND_TO_DB 保持一致
+  const ALL_STATUSES_CN = ["已校验", "未校验", "已标注"];
+  const STATUS_MAP_CN_TO_EN = {
+    已校验: "verified",
+    未校验: "unverified",
+    已标注: "manual_annotation_flag", // 仅用于表示该类型，实际查询是 confidence=-1
+  };
+  const STATUS_MAP_EN_TO_CN = {
+    verified: "已校验",
+    unverified: "未校验",
+    manual_annotation_flag: "已标注", // 对应后端 confidence=-1
+  };
+  let allPossibleStatuses = new Set(ALL_STATUSES_CN); // 明确定义所有可能的状态
 
-    // 全局变量，存储从后端获取的数据，用于去噪功能
-    let result = [];
+  // 全局变量，存储从后端获取的数据，用于去噪功能
+  let result = [];
 
-    // 辅助函数，用于在数组中搜索建议 (用于编辑标签时的模糊搜索)
-    function searchByIndexOf(keyWord, list) {
-        if (!Array.isArray(list)) {
-            return [];
-        }
-        if (keyWord === "") {
-            return Array.from(list);
-        } else {
-            return list.filter(item => String(item).toLowerCase().includes(keyWord.toLowerCase()));
-        }
+  // 辅助函数，用于在数组中搜索建议 (用于编辑标签时的模糊搜索)
+  function searchByIndexOf(keyWord, list) {
+    if (!Array.isArray(list)) {
+      return [];
+    }
+    if (keyWord === "") {
+      return Array.from(list);
+    } else {
+      return list.filter((item) =>
+        String(item).toLowerCase().includes(keyWord.toLowerCase()),
+      );
+    }
+  }
+
+  // 根据当前筛选和排序更新 URL 参数 (只更新 URL，不触发数据加载)
+  function updateURLParams() {
+    const url = new URL(location.href);
+    Object.keys(activeFilters).forEach((type) => {
+      const values = Array.from(activeFilters[type]);
+      if (values.length > 0) {
+        // 确保编码正确，尤其是中文状态
+        url.searchParams.set(type, values.map(encodeURIComponent).join(","));
+      } else {
+        url.searchParams.delete(type);
+      }
+    });
+
+    if (activeSort.column) {
+      url.searchParams.set("sort", `${activeSort.column}:${activeSort.order}`);
+    } else {
+      url.searchParams.delete("sort");
     }
 
-    // 根据当前筛选和排序更新 URL 参数 (只更新 URL，不触发数据加载)
-    function updateURLParams() {
-        const url = new URL(location.href);
-        Object.keys(activeFilters).forEach(type => {
-            const values = Array.from(activeFilters[type]);
-            if (values.length > 0) {
-                // 确保编码正确，尤其是中文状态
-                url.searchParams.set(type, values.map(encodeURIComponent).join(','));
-            } else {
-                url.searchParams.delete(type);
-            }
-        });
+    url.searchParams.set("page", currentPage);
+    url.searchParams.set("page_size", pageSize);
 
-        if (activeSort.column) {
-            url.searchParams.set('sort', `${activeSort.column}:${activeSort.order}`);
-        } else {
-            url.searchParams.delete('sort');
-        }
+    history.replaceState({}, "", url);
+  }
 
-        url.searchParams.set('page', currentPage);
-        url.searchParams.set('page_size', pageSize);
-
-        history.replaceState({}, '', url);
+  // 初始化筛选列选项并检查现有筛选器
+  function initFilterColumn(type, allPossibleValues) {
+    const container = document.getElementById(`${type}-options`);
+    if (!container) {
+      console.error(`未找到类型为 ${type} 的筛选选项容器。`);
+      return;
     }
 
-    // 初始化筛选列选项并检查现有筛选器
-    function initFilterColumn(type, allPossibleValues) {
-        const container = document.getElementById(`${type}-options`);
-        if (!container) {
-            console.error(`未找到类型为 ${type} 的筛选选项容器。`);
-            return;
-        }
+    container.innerHTML = ""; // 清空现有内容以重建
 
-        container.innerHTML = ''; // 清空现有内容以重建
+    let sortedValues = Array.from(allPossibleValues);
+    if (type === "confidence") {
+      sortedValues.sort((a, b) => parseFloat(a) - parseFloat(b));
+    } else if (type === "status") {
+      // 状态自定义排序
+      const statusOrder = { 已校验: 1, 未校验: 2, 已标注: 3 };
+      sortedValues.sort((a, b) => {
+        const orderA = statusOrder[a] || 99;
+        const orderB = statusOrder[b] || 99;
+        return orderA - orderB;
+      });
+    } else {
+      sortedValues.sort((a, b) => String(a).localeCompare(String(b)));
+    }
 
-        let sortedValues = Array.from(allPossibleValues);
-        if (type === 'confidence') {
-            sortedValues.sort((a, b) => parseFloat(a) - parseFloat(b));
-        } else if (type === 'status') {
-            // 状态自定义排序
-            const statusOrder = { '已校验': 1, '未校验': 2, '已标注': 3 };
-            sortedValues.sort((a, b) => {
-                const orderA = statusOrder[a] || 99;
-                const orderB = statusOrder[b] || 99;
-                return orderA - orderB;
-            });
-        } else {
-            sortedValues.sort((a, b) => String(a).localeCompare(String(b)));
-        }
-
-        // 添加“全选”选项
-        const allItem = document.createElement('label');
-        allItem.className = 'option-item';
-        allItem.innerHTML = `
+    // 添加“全选”选项
+    const allItem = document.createElement("label");
+    allItem.className = "option-item";
+    allItem.innerHTML = `
             <input type="checkbox" value="all" id="all-${type}" style="margin-right: 5px;">
             <span>全选</span>
         `;
-        const allCheckbox = allItem.querySelector('input');
-        allCheckbox.addEventListener('change', (e) => {
-            handleAllCheck(type, e.target.checked);
-        });
-        container.appendChild(allItem);
+    const allCheckbox = allItem.querySelector("input");
+    allCheckbox.addEventListener("change", (e) => {
+      handleAllCheck(type, e.target.checked);
+    });
+    container.appendChild(allItem);
 
-        sortedValues.forEach(value => {
-            const item = document.createElement('label');
-            item.className = 'option-item';
-            item.innerHTML = `
+    sortedValues.forEach((value) => {
+      const item = document.createElement("label");
+      item.className = "option-item";
+      item.innerHTML = `
                 <input type="checkbox" value="${value}" style="margin-right: 5px;">
                 <span>${value}</span>
             `;
-            const checkbox = item.querySelector('input');
-            checkbox.addEventListener('change', (e) => {
-                // 只有当不是“全选”框时才直接操作 activeFilters
-                if (e.target.value !== 'all') {
-                    if (e.target.checked) {
-                        activeFilters[type].add(value);
-                    } else {
-                        activeFilters[type].delete(value);
-                    }
-                }
-                updateAllCheckboxStatus(type); // 立即更新“全选”复选框的状态
-            });
-            container.appendChild(item);
-            if (activeFilters[type].has(value)) {
-                checkbox.checked = true;
-            }
-        });
-
-        // 初始加载时更新“全选”复选框状态
-        updateAllCheckboxStatus(type);
-
-        // 更新头部样式以指示激活的筛选器
-        applyFiltersDisplayOnly();
-    }
-
-    // 从后端获取所有可能的标签和置信度值
-    async function fetchAllMetaData() {
-        try {
-            const response = await fetch(`/api/tasks/${task_id}/meta_data/`);
-            if (!response.ok) {
-                return response.text().then(text => {
-                    console.error("获取元数据失败:", response.status, "响应内容:", text);
-                    if (text.startsWith('<!DOCTYPE')) {
-                        throw new Error(`服务器返回 HTML 页面，而非 JSON。可能需要登录或权限。Status: ${response.status}`);
-                    }
-                    throw new Error(`HTTP 错误! 状态: ${response.status} 响应: ${text}`);
-                });
-            }
-            const data = await response.json();
-            if (data.status === 'success') {
-                allPossibleLabels.clear();
-                data.labels.forEach(label => allPossibleLabels.add(label));
-
-                allPossibleConfidences.clear();
-                // 确保置信度保留三位小数
-                data.confidences.forEach(conf => {
-                    allPossibleConfidences.add(parseFloat(conf).toFixed(3));
-                });
-                // allPossibleStatuses 已经在全局定义为固定值，无需从后端获取
-            } else {
-                console.error("获取元数据失败:", data.message);
-                window.showMessage('获取筛选选项失败: ' + data.message, 'error');
-            }
-        } catch (error) {
-            console.error('获取元数据时出错:', error);
-            window.showMessage('获取筛选选项失败: ' + error.message, 'error');
+      const checkbox = item.querySelector("input");
+      checkbox.addEventListener("change", (e) => {
+        // 只有当不是“全选”框时才直接操作 activeFilters
+        if (e.target.value !== "all") {
+          if (e.target.checked) {
+            activeFilters[type].add(value);
+          } else {
+            activeFilters[type].delete(value);
+          }
         }
-        initFilterColumns(); // 无论是否成功获取元数据，都初始化筛选器列
-    }
-
-    // 调用 initFilterColumn 初始化所有相关列
-    function initFilterColumns() {
-        initFilterColumn('label', allPossibleLabels);
-        initFilterColumn('confidence', allPossibleConfidences);
-        initFilterColumn('status', allPossibleStatuses); // 使用定义好的allPossibleStatuses
-        applyFiltersDisplayOnly();
-    }
-
-    // 处理“全选”复选框
-    function handleAllCheck(type, checked) {
-        // 获取所有当前可见的非“全选”筛选选项
-        const visibleFilterableCheckboxes = document.querySelectorAll(`#${type}-options .option-item input[type="checkbox"]:not(#all-${type})`);
-
-        visibleFilterableCheckboxes.forEach(checkbox => {
-            // 只有当前可见的选项才进行UI更新和activeFilters的同步
-            if (checkbox.closest('.option-item').style.display !== 'none') {
-                checkbox.checked = checked;
-                if (checked) {
-                    activeFilters[type].add(checkbox.value);
-                } else {
-                    activeFilters[type].delete(checkbox.value);
-                }
-            }
-        });
-        updateAllCheckboxStatus(type); // 再次更新“全选”状态，处理不确定状态
-    }
-
-    // 应用筛选器按钮点击事件
-    function applyFilters() {
-        // 关闭所有下拉菜单
-        document.querySelectorAll('.custom-select').forEach(select => {
-            select.classList.remove('active');
-            select.querySelector('.options-wrapper').style.display = 'none';
-            select.querySelector('.select-header').classList.remove('active');
-        });
-        loadPage(1); // 应用筛选器后重新加载数据，重置到第一页
-    }
-
-    // 重置单个筛选器
-    function resetFilter(type) {
-        activeFilters[type].clear(); // 清空该类型的筛选
-        // 重新初始化该列UI
-        initFilterColumn(type, type === 'label' ? allPossibleLabels : (type === 'confidence' ? allPossibleConfidences : allPossibleStatuses));
-        applyFilters(); // 应用筛选并刷新页面
-    }
-
-    // 处理排序按钮点击事件
-    function handleSort(column, order) {
-        activeSort = { column, order };
-        loadPage(1); // 排序改变后重新加载数据，重置到第一页
-
-        // 关闭所有下拉菜单
-        document.querySelectorAll('.custom-select').forEach(select => {
-            select.classList.remove('active');
-            select.querySelector('.options-wrapper').style.display = 'none';
-            select.querySelector('.select-header').classList.remove('active');
-        });
-        applyFiltersDisplayOnly(); // 更新头部样式以反映排序状态
-    }
-
-    // 重置排序功能，仅重置排序，不清空筛选器
-    function resetSort() {
-        activeSort = { column: null, order: null }; // 只重置排序状态
-        loadPage(1); // 重新加载数据以应用重置的排序，保留当前筛选
-
-        // 关闭所有下拉菜单
-        document.querySelectorAll('.custom-select').forEach(select => {
-            select.classList.remove('active');
-            select.querySelector('.options-wrapper').style.display = 'none';
-            select.querySelector('.select-header').classList.remove('active');
-        });
-        applyFiltersDisplayOnly(); // 更新头部样式，因为排序状态可能改变
-    }
-
-    // 下拉菜单交互
-    function toggleDropdown(type) {
-        const container = document.querySelector(`#filter-${type}`);
-        const wrapper = container.querySelector('.options-wrapper');
-        const header = container.querySelector('.select-header');
-
-        // 关闭其他所有打开的下拉菜单
-        document.querySelectorAll('.custom-select').forEach(select => {
-            if (select !== container) {
-                select.classList.remove('active');
-                select.querySelector('.options-wrapper').style.display = 'none';
-                select.querySelector('.select-header').classList.remove('active');
-            }
-        });
-
-        container.classList.toggle('active');
-        wrapper.style.display = container.classList.contains('active') ? 'block' : 'none';
-        header.classList.toggle('active');
-    }
-
-    // 点击外部时关闭下拉菜单
-    document.addEventListener('click', function (e) {
-        if (!e.target.closest('.custom-select')) {
-            document.querySelectorAll('.custom-select').forEach(select => {
-                select.classList.remove('active');
-                select.querySelector('.options-wrapper').style.display = 'none';
-                select.querySelector('.select-header').classList.remove('active');
-            });
-        }
+        updateAllCheckboxStatus(type); // 立即更新“全选”复选框的状态
+      });
+      container.appendChild(item);
+      if (activeFilters[type].has(value)) {
+        checkbox.checked = true;
+      }
     });
 
-    // 下拉菜单内的筛选搜索框
-    function filterOptions(type, keyword) {
-        // 只筛选非排序和非重置的选项
-        const items = document.querySelectorAll(`#${type}-options .option-item:not(.sort-option):not(.reset-filter-option)`);
-        const searchTerm = keyword.toLowerCase();
-        items.forEach(item => {
-            // “全选”选项应该一直显示
-            if (item.querySelector(`input[value="all"]`)) {
-                item.style.display = 'flex';
-            } else {
-                const text = item.textContent.toLowerCase();
-                item.style.display = text.includes(searchTerm) ? 'flex' : 'none';
-            }
+    // 初始加载时更新“全选”复选框状态
+    updateAllCheckboxStatus(type);
+
+    // 更新头部样式以指示激活的筛选器
+    applyFiltersDisplayOnly();
+  }
+
+  // 从后端获取所有可能的标签和置信度值
+  async function fetchAllMetaData() {
+    try {
+      const response = await fetch(`/api/tasks/${task_id}/meta_data/`);
+      if (!response.ok) {
+        return response.text().then((text) => {
+          console.error("获取元数据失败:", response.status, "响应内容:", text);
+          if (text.startsWith("<!DOCTYPE")) {
+            throw new Error(
+              `服务器返回 HTML 页面，而非 JSON。可能需要登录或权限。Status: ${response.status}`,
+            );
+          }
+          throw new Error(`HTTP 错误! 状态: ${response.status} 响应: ${text}`);
         });
-        updateAllCheckboxStatus(type); // 每次过滤选项时，重新评估“全选”状态
+      }
+      const data = await response.json();
+      if (data.status === "success") {
+        allPossibleLabels.clear();
+        data.labels.forEach((label) => allPossibleLabels.add(label));
+
+        allPossibleConfidences.clear();
+        // 确保置信度保留三位小数
+        data.confidences.forEach((conf) => {
+          allPossibleConfidences.add(parseFloat(conf).toFixed(3));
+        });
+        // allPossibleStatuses 已经在全局定义为固定值，无需从后端获取
+      } else {
+        console.error("获取元数据失败:", data.message);
+        window.showMessage("获取筛选选项失败: " + data.message, "error");
+      }
+    } catch (error) {
+      console.error("获取元数据时出错:", error);
+      window.showMessage("获取筛选选项失败: " + error.message, "error");
     }
+    initFilterColumns(); // 无论是否成功获取元数据，都初始化筛选器列
+  }
 
-    // 更新“全选”复选框的状态
-    function updateAllCheckboxStatus(type) {
-        const allCheckbox = document.getElementById(`all-${type}`);
-        if (!allCheckbox) return;
+  // 调用 initFilterColumn 初始化所有相关列
+  function initFilterColumns() {
+    initFilterColumn("label", allPossibleLabels);
+    initFilterColumn("confidence", allPossibleConfidences);
+    initFilterColumn("status", allPossibleStatuses); // 使用定义好的allPossibleStatuses
+    applyFiltersDisplayOnly();
+  }
 
-        // 获取所有当前可见的、可被筛选的选项 (不包括“全选”自身)
-        const visibleFilterableCheckboxes = Array.from(document.querySelectorAll(`#${type}-options .option-item input[type="checkbox"]:not(#all-${type})`))
-                                            .filter(cb => cb.closest('.option-item').style.display !== 'none'); // 过滤掉被隐藏的项
+  // 处理“全选”复选框
+  function handleAllCheck(type, checked) {
+    // 获取所有当前可见的非“全选”筛选选项
+    const visibleFilterableCheckboxes = document.querySelectorAll(
+      `#${type}-options .option-item input[type="checkbox"]:not(#all-${type})`,
+    );
 
-        const visibleFilterableValues = visibleFilterableCheckboxes.map(cb => cb.value);
-
-        const checkedVisibleValues = visibleFilterableValues.filter(val => activeFilters[type].has(val));
-
-        if (visibleFilterableValues.length === 0) {
-            allCheckbox.checked = false;
-            allCheckbox.indeterminate = false;
+    visibleFilterableCheckboxes.forEach((checkbox) => {
+      // 只有当前可见的选项才进行UI更新和activeFilters的同步
+      if (checkbox.closest(".option-item").style.display !== "none") {
+        checkbox.checked = checked;
+        if (checked) {
+          activeFilters[type].add(checkbox.value);
         } else {
-            allCheckbox.checked = checkedVisibleValues.length === visibleFilterableValues.length;
-            allCheckbox.indeterminate = checkedVisibleValues.length > 0 && checkedVisibleValues.length < visibleFilterableValues.length;
+          activeFilters[type].delete(checkbox.value);
         }
+      }
+    });
+    updateAllCheckboxStatus(type); // 再次更新“全选”状态，处理不确定状态
+  }
+
+  // 应用筛选器按钮点击事件
+  function applyFilters() {
+    // 关闭所有下拉菜单
+    document.querySelectorAll(".custom-select").forEach((select) => {
+      select.classList.remove("active");
+      select.querySelector(".options-wrapper").style.display = "none";
+      select.querySelector(".select-header").classList.remove("active");
+    });
+    loadPage(1); // 应用筛选器后重新加载数据，重置到第一页
+  }
+
+  // 重置单个筛选器
+  function resetFilter(type) {
+    activeFilters[type].clear(); // 清空该类型的筛选
+    // 重新初始化该列UI
+    initFilterColumn(
+      type,
+      type === "label"
+        ? allPossibleLabels
+        : type === "confidence"
+          ? allPossibleConfidences
+          : allPossibleStatuses,
+    );
+    applyFilters(); // 应用筛选并刷新页面
+  }
+
+  // 处理排序按钮点击事件
+  function handleSort(column, order) {
+    activeSort = { column, order };
+    loadPage(1); // 排序改变后重新加载数据，重置到第一页
+
+    // 关闭所有下拉菜单
+    document.querySelectorAll(".custom-select").forEach((select) => {
+      select.classList.remove("active");
+      select.querySelector(".options-wrapper").style.display = "none";
+      select.querySelector(".select-header").classList.remove("active");
+    });
+    applyFiltersDisplayOnly(); // 更新头部样式以反映排序状态
+  }
+
+  // 重置排序功能，仅重置排序，不清空筛选器
+  function resetSort() {
+    activeSort = { column: null, order: null }; // 只重置排序状态
+    loadPage(1); // 重新加载数据以应用重置的排序，保留当前筛选
+
+    // 关闭所有下拉菜单
+    document.querySelectorAll(".custom-select").forEach((select) => {
+      select.classList.remove("active");
+      select.querySelector(".options-wrapper").style.display = "none";
+      select.querySelector(".select-header").classList.remove("active");
+    });
+    applyFiltersDisplayOnly(); // 更新头部样式，因为排序状态可能改变
+  }
+
+  // 下拉菜单交互
+  function toggleDropdown(type) {
+    const container = document.querySelector(`#filter-${type}`);
+    const wrapper = container.querySelector(".options-wrapper");
+    const header = container.querySelector(".select-header");
+
+    // 关闭其他所有打开的下拉菜单
+    document.querySelectorAll(".custom-select").forEach((select) => {
+      if (select !== container) {
+        select.classList.remove("active");
+        select.querySelector(".options-wrapper").style.display = "none";
+        select.querySelector(".select-header").classList.remove("active");
+      }
+    });
+
+    container.classList.toggle("active");
+    wrapper.style.display = container.classList.contains("active")
+      ? "block"
+      : "none";
+    header.classList.toggle("active");
+  }
+
+  // 点击外部时关闭下拉菜单
+  document.addEventListener("click", function (e) {
+    if (!e.target.closest(".custom-select")) {
+      document.querySelectorAll(".custom-select").forEach((select) => {
+        select.classList.remove("active");
+        select.querySelector(".options-wrapper").style.display = "none";
+        select.querySelector(".select-header").classList.remove("active");
+      });
+    }
+  });
+
+  // 下拉菜单内的筛选搜索框
+  function filterOptions(type, keyword) {
+    // 只筛选非排序和非重置的选项
+    const items = document.querySelectorAll(
+      `#${type}-options .option-item:not(.sort-option):not(.reset-filter-option)`,
+    );
+    const searchTerm = keyword.toLowerCase();
+    items.forEach((item) => {
+      // “全选”选项应该一直显示
+      if (item.querySelector(`input[value="all"]`)) {
+        item.style.display = "flex";
+      } else {
+        const text = item.textContent.toLowerCase();
+        item.style.display = text.includes(searchTerm) ? "flex" : "none";
+      }
+    });
+    updateAllCheckboxStatus(type); // 每次过滤选项时，重新评估“全选”状态
+  }
+
+  // 更新“全选”复选框的状态
+  function updateAllCheckboxStatus(type) {
+    const allCheckbox = document.getElementById(`all-${type}`);
+    if (!allCheckbox) return;
+
+    // 获取所有当前可见的、可被筛选的选项 (不包括“全选”自身)
+    const visibleFilterableCheckboxes = Array.from(
+      document.querySelectorAll(
+        `#${type}-options .option-item input[type="checkbox"]:not(#all-${type})`,
+      ),
+    ).filter((cb) => cb.closest(".option-item").style.display !== "none"); // 过滤掉被隐藏的项
+
+    const visibleFilterableValues = visibleFilterableCheckboxes.map(
+      (cb) => cb.value,
+    );
+
+    const checkedVisibleValues = visibleFilterableValues.filter((val) =>
+      activeFilters[type].has(val),
+    );
+
+    if (visibleFilterableValues.length === 0) {
+      allCheckbox.checked = false;
+      allCheckbox.indeterminate = false;
+    } else {
+      allCheckbox.checked =
+        checkedVisibleValues.length === visibleFilterableValues.length;
+      allCheckbox.indeterminate =
+        checkedVisibleValues.length > 0 &&
+        checkedVisibleValues.length < visibleFilterableValues.length;
+    }
+  }
+
+  // 编辑特定项的标签
+  function editLabel(itemId) {
+    const labelDisplay = document.getElementById(`label-display-${itemId}`);
+    const labelInput = document.getElementById(`label-input-${itemId}`);
+    const selectedId = document.getElementById(`selectedId-${itemId}`);
+    const saveButton = document.getElementById(`save-button-${itemId}`);
+
+    if (!labelDisplay || !labelInput || !selectedId || !saveButton) {
+      console.error(`Missing elements for item ${itemId}`);
+      return;
     }
 
+    labelDisplay.style.display = "none";
+    labelInput.style.display = "block"; // input 应该以 block 或 flex-grow 显示
+    labelInput.focus();
+    saveButton.style.display = "inline-block"; // save button 保持 inline-block
 
-    // 编辑特定项的标签
-    function editLabel(itemId) {
-        const labelDisplay = document.getElementById(`label-display-${itemId}`);
-        const labelInput = document.getElementById(`label-input-${itemId}`);
-        const selectedId = document.getElementById(`selectedId-${itemId}`);
-        const saveButton = document.getElementById(`save-button-${itemId}`);
-
-        if (!labelDisplay || !labelInput || !selectedId || !saveButton) {
-            console.error(`Missing elements for item ${itemId}`);
-            return;
-        }
-
-        labelDisplay.style.display = 'none';
-        labelInput.style.display = 'block'; // input 应该以 block 或 flex-grow 显示
-        labelInput.focus();
-        saveButton.style.display = 'inline-block'; // save button 保持 inline-block
-
-        const showList = () => {
-            var res = searchByIndexOf(labelInput.value, Array.from(allPossibleLabels));
-            selectedId.innerHTML = '';
-            // 只有当有匹配结果时才显示边框
-            if (res.length > 0) {
-                selectedId.style.border = '1px solid #ccc';
-            } else {
-                selectedId.style.border = 'none';
-            }
-            res.forEach(label => {
-                var li = document.createElement("li");
-                li.textContent = label;
-                li.onclick = function () {
-                    labelInput.value = this.textContent;
-                    selectedId.innerHTML = '';
-                    selectedId.style.border = 'none';
-                    // 不直接保存，等待用户点击保存按钮或回车
-                };
-                selectedId.appendChild(li);
-            });
+    const showList = () => {
+      var res = searchByIndexOf(
+        labelInput.value,
+        Array.from(allPossibleLabels),
+      );
+      selectedId.innerHTML = "";
+      // 只有当有匹配结果时才显示边框
+      if (res.length > 0) {
+        selectedId.style.border = "1px solid #ccc";
+      } else {
+        selectedId.style.border = "none";
+      }
+      res.forEach((label) => {
+        var li = document.createElement("li");
+        li.textContent = label;
+        li.onclick = function () {
+          labelInput.value = this.textContent;
+          selectedId.innerHTML = "";
+          selectedId.style.border = "none";
+          // 不直接保存，等待用户点击保存按钮或回车
         };
+        selectedId.appendChild(li);
+      });
+    };
 
-        labelInput.oninput = showList;
-        labelInput.onfocus = showList;
-        // onblur 增加延迟，以便用户点击列表项
-        labelInput.onblur = () => setTimeout(() => { selectedId.innerHTML = ''; selectedId.style.border = 'none'; }, 200);
+    labelInput.oninput = showList;
+    labelInput.onfocus = showList;
+    // onblur 增加延迟，以便用户点击列表项
+    labelInput.onblur = () =>
+      setTimeout(() => {
+        selectedId.innerHTML = "";
+        selectedId.style.border = "none";
+      }, 200);
 
-        const saveLabel = () => {
-            // 获取原始标签值，以便比较
-            const originalLabel = labelDisplay.textContent.trim();
-            // 移除去噪提示，只比较实际标签
-            const cleanOriginalLabel = originalLabel.replace(/\(建议修改\)/g, '').trim();
-            updateLabel(itemId, labelInput.value, cleanOriginalLabel);
-        };
+    const saveLabel = () => {
+      // 获取原始标签值，以便比较
+      const originalLabel = labelDisplay.textContent.trim();
+      // 移除去噪提示，只比较实际标签
+      const cleanOriginalLabel = originalLabel
+        .replace(/\(建议修改\)/g, "")
+        .trim();
+      updateLabel(itemId, labelInput.value, cleanOriginalLabel);
+    };
 
-        labelInput.addEventListener('keypress', (event) => {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                saveLabel();
-            }
-        });
-        saveButton.onclick = saveLabel;
+    labelInput.addEventListener("keypress", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        saveLabel();
+      }
+    });
+    saveButton.onclick = saveLabel;
+  }
+
+  // 通过 API 更新标签
+  function updateLabel(itemId, newLabel, originalLabel) {
+    // 如果新标签与原始标签相同，则提前结束，避免不必要的请求
+    if (newLabel === originalLabel) {
+      window.showMessage("标签未修改", "warning");
+      // 恢复显示状态
+      const labelDisplay = document.getElementById(`label-display-${itemId}`);
+      const labelInput = document.getElementById(`label-input-${itemId}`);
+      const saveButton = document.getElementById(`save-button-${itemId}`);
+      if (labelDisplay && labelInput && saveButton) {
+        labelDisplay.style.display = "block"; // 恢复为 block
+        labelInput.style.display = "none";
+        saveButton.style.display = "none";
+      }
+      return; // 提前退出
     }
 
-    // 通过 API 更新标签
-    function updateLabel(itemId, newLabel, originalLabel) {
-        // 如果新标签与原始标签相同，则提前结束，避免不必要的请求
-        if (newLabel === originalLabel) {
-            window.showMessage('标签未修改', 'warning');
-            // 恢复显示状态
-            const labelDisplay = document.getElementById(`label-display-${itemId}`);
-            const labelInput = document.getElementById(`label-input-${itemId}`);
-            const saveButton = document.getElementById(`save-button-${itemId}`);
-            if (labelDisplay && labelInput && saveButton) {
-                labelDisplay.style.display = 'block'; // 恢复为 block
-                labelInput.style.display = 'none';
-                saveButton.style.display = 'none';
-            }
-            return; // 提前退出
-        }
+    window.showGlobalLoading(); // 显示加载指示器
 
-        window.showGlobalLoading(); // 显示加载指示器
-
-        fetch(`/tasks/${task_id}/update/`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'X-CSRFToken': window.getCookie('csrftoken')
-            },
-            body: `item_id=${itemId}&label=${encodeURIComponent(newLabel)}` // 确保编码
-        })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    window.showMessage('标签更新成功!', 'success');
-                    // 重新获取元数据以更新筛选器中的标签选项（如果有新标签加入）
-                    fetchAllMetaData().then(() => {
-                        loadPage(currentPage); // 刷新当前页
-                    });
-                } else if (data.status === 'no_change') { // 即使后端返回 no_change, 上面已经提前判断了，这里理论上不会走到
-                    window.showMessage('标签未修改', 'warning');
-                } else {
-                    window.showMessage(`错误: ${data.message}`, 'error');
-                    loadPage(currentPage); // 失败也尝试刷新，确保数据一致
-                }
-            })
-            .catch(error => {
-                window.showMessage(`请求失败: ${error.message}`, 'error');
-                loadPage(currentPage); // 失败也尝试刷新，确保数据一致
-            })
-            .finally(() => {
-                window.hideGlobalLoading(); // 隐藏加载指示器
-            });
-    }
-
-    // 切换单个图像项的校验状态 (通过or取消)
-    function toggleVerificationStatus(itemId, currentStatusCN) { // 传入当前中文状态
-        let targetStatusCN; // 前端中文状态
-        let targetStatusEN; // 后端英文状态
-
-        if (currentStatusCN === '已校验') {
-            targetStatusCN = '未校验';
-            targetStatusEN = STATUS_MAP_CN_TO_EN['未校验'];
-        } else if (currentStatusCN === '未校验') {
-            targetStatusCN = '已校验';
-            targetStatusEN = STATUS_MAP_CN_TO_EN['已校验'];
-        } else if (currentStatusCN === '已标注') {
-            // 人工标注的样本不能通过此按钮进行校验操作，只能通过“修改”按钮改变标签并间接变为“已校验”
-            window.showMessage('人工标注的样本请通过“修改”按钮进行操作。', 'info');
-            return;
+    fetch(`/tasks/${task_id}/update/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-CSRFToken": window.getCookie("csrftoken"),
+      },
+      body: `item_id=${itemId}&label=${encodeURIComponent(newLabel)}`, // 确保编码
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.status === "success") {
+          window.showMessage("标签更新成功!", "success");
+          // 重新获取元数据以更新筛选器中的标签选项（如果有新标签加入）
+          fetchAllMetaData().then(() => {
+            loadPage(currentPage); // 刷新当前页
+          });
+        } else if (data.status === "no_change") {
+          // 即使后端返回 no_change, 上面已经提前判断了，这里理论上不会走到
+          window.showMessage("标签未修改", "warning");
         } else {
-            window.showMessage('此样本无需校验操作。', 'info');
-            return;
+          window.showMessage(`错误: ${data.message}`, "error");
+          loadPage(currentPage); // 失败也尝试刷新，确保数据一致
         }
+      })
+      .catch((error) => {
+        window.showMessage(`请求失败: ${error.message}`, "error");
+        loadPage(currentPage); // 失败也尝试刷新，确保数据一致
+      })
+      .finally(() => {
+        window.hideGlobalLoading(); // 隐藏加载指示器
+      });
+  }
 
-        window.showGlobalLoading(); // 显示加载指示器
+  // 切换单个图像项的校验状态 (通过or取消)
+  function toggleVerificationStatus(itemId, currentStatusCN) {
+    // 传入当前中文状态
+    let targetStatusCN; // 前端中文状态
+    let targetStatusEN; // 后端英文状态
 
-        fetch(`/tasks/${task_id}/verify/`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'X-CSRFToken': window.getCookie('csrftoken')
-            },
-            body: `item_id=${itemId}&target_status=${encodeURIComponent(targetStatusCN)}` // 传递前端中文目标状态
-        })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    window.showMessage(data.message, 'success');
-                    loadPage(currentPage); // 刷新
-                    window.updateStats(); // <--- 校验后，更新顶部的统计
-                } else if (data.status === 'no_change') {
-                    window.showMessage(data.message, 'warning');
-                }
-                else {
-                    window.showMessage(`错误: ${data.message}`, 'error');
-                }
-            })
-            .catch(error => window.showMessage(`请求失败: ${error.message}`, 'error'))
-            .finally(() => {
-                window.hideGlobalLoading(); // 隐藏加载指示器
-            });
+    if (currentStatusCN === "已校验") {
+      targetStatusCN = "未校验";
+      targetStatusEN = STATUS_MAP_CN_TO_EN["未校验"];
+    } else if (currentStatusCN === "未校验") {
+      targetStatusCN = "已校验";
+      targetStatusEN = STATUS_MAP_CN_TO_EN["已校验"];
+    } else if (currentStatusCN === "已标注") {
+      // 人工标注的样本不能通过此按钮进行校验操作，只能通过“修改”按钮改变标签并间接变为“已校验”
+      window.showMessage("人工标注的样本请通过“修改”按钮进行操作。", "info");
+      return;
+    } else {
+      window.showMessage("此样本无需校验操作。", "info");
+      return;
     }
 
-    // 打开图片模态框
-    function openModal(imageUrl) {
-        const modal = document.getElementById("image-modal");
-        const modalImage = document.getElementById("modal-image");
+    window.showGlobalLoading(); // 显示加载指示器
 
-        if (!modal || !modalImage) {
-            console.error("未找到模态框或模态图片元素。");
-            return;
+    fetch(`/tasks/${task_id}/verify/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-CSRFToken": window.getCookie("csrftoken"),
+      },
+      body: `item_id=${itemId}&target_status=${encodeURIComponent(targetStatusCN)}`, // 传递前端中文目标状态
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.status === "success") {
+          window.showMessage(data.message, "success");
+          loadPage(currentPage); // 刷新
+          window.updateStats(); // <--- 校验后，更新顶部的统计
+        } else if (data.status === "no_change") {
+          window.showMessage(data.message, "warning");
+        } else {
+          window.showMessage(`错误: ${data.message}`, "error");
         }
+      })
+      .catch((error) =>
+        window.showMessage(`请求失败: ${error.message}`, "error"),
+      )
+      .finally(() => {
+        window.hideGlobalLoading(); // 隐藏加载指示器
+      });
+  }
 
-        modalImage.src = imageUrl;
-        modal.style.display = "flex";
+  // 打开图片模态框
+  function openModal(imageUrl) {
+    const modal = document.getElementById("image-modal");
+    const modalImage = document.getElementById("modal-image");
 
-        // 点击背景关闭模态框
-        modal.addEventListener('click', function (event) {
-            if (event.target === this) {
-                closeModal();
+    if (!modal || !modalImage) {
+      console.error("未找到模态框或模态图片元素。");
+      return;
+    }
+
+    modalImage.src = imageUrl;
+    modal.style.display = "flex";
+
+    // 点击任意处关闭模态框（包含图片）
+    modal.addEventListener("click", function (event) {
+      closeModal();
+    });
+    // Esc 关闭
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") {
+        closeModal();
+      }
+    });
+  }
+
+  // 关闭图片模态框
+  function closeModal() {
+    const modal = document.getElementById("image-modal");
+    if (modal) {
+      modal.style.display = "none";
+    }
+  }
+
+  // 从 API 加载页面数据
+  function loadPage(page) {
+    // 确保页码在有效范围内
+    if (totalPages > 0 && (page < 1 || page > totalPages)) {
+      page = Math.max(1, Math.min(page, totalPages)); // 强制修正到有效页码
+      if (page === currentPage) {
+        // 如果修正后还是当前页，则无需加载
+        return;
+      }
+    }
+    currentPage = page;
+
+    window.showGlobalLoading(); // 显示加载指示器
+
+    const urlParams = new URLSearchParams();
+    Object.keys(activeFilters).forEach((type) => {
+      const values = Array.from(activeFilters[type]);
+      if (values.length > 0) {
+        urlParams.set(type, values.map(encodeURIComponent).join(",")); // 确保编码
+      }
+    });
+
+    if (activeSort.column) {
+      urlParams.set("sort", `${activeSort.column}:${activeSort.order}`);
+    }
+    urlParams.set("page", currentPage);
+    urlParams.set("page_size", pageSize);
+
+    updateURLParams(); // 更新浏览器URL，但不重载页面
+
+    fetch(`/tasks/${task_id}/data/?${urlParams.toString()}`)
+      .then((response) => {
+        if (!response.ok) {
+          return response.text().then((text) => {
+            console.error("加载数据失败:", response.status, "响应内容:", text);
+            if (text.startsWith("<!DOCTYPE")) {
+              throw new Error(
+                `服务器返回 HTML 页面，而非 JSON。可能需要登录或权限。Status: ${response.status}`,
+              );
             }
-        });
+            throw new Error(
+              `HTTP 错误! 状态: ${response.status} 响应: ${text}`,
+            );
+          });
+        }
+        return response.json();
+      })
+      .then((data) => {
+        result = data.results; // 更新全局result变量，以便去噪功能使用
+        renderTable(result);
+        updatePagination(data.page, data.total_pages);
+        applyFiltersDisplayOnly();
+        window.updateStats(); // 在数据加载并渲染表格后更新顶部的统计信息
+      })
+      .catch((error) => {
+        console.error("加载数据时出错:", error);
+        window.showMessage("加载数据失败: " + error.message, "error");
+        renderTable([]); // 加载失败时清空表格
+        updatePagination(1, 0); // 重置分页
+      })
+      .finally(() => {
+        window.hideGlobalLoading(); // 隐藏加载指示器
+      });
+  }
+
+  // 从输入框跳转到指定页面
+  function goToPage() {
+    const pageInput = document.getElementById("page-input"); // 假设页面上有此元素
+    if (!pageInput) {
+      console.warn("分页元素 'page-input' 未找到。");
+      window.showMessage("无法跳转页面：缺少页码输入框。", "error");
+      return;
+    }
+    const targetPage = parseInt(pageInput.value, 10);
+    if (
+      isNaN(targetPage) ||
+      targetPage < 1 ||
+      (totalPages > 0 && targetPage > totalPages)
+    ) {
+      window.showMessage(`请输入有效的页码 (1-${totalPages})`, "warning");
+      pageInput.value = "";
+      return;
+    }
+    loadPage(targetPage);
+  }
+
+  // 更新分页控件 (假设 base_task.html 中有这些分页元素)
+  function updatePagination(page, total_pages) {
+    currentPage = page;
+    totalPages = total_pages;
+
+    const currentPageSpan = document.getElementById("current-page");
+    const totalPagesSpan = document.getElementById("total-pages");
+    const prevPageBtn = document.getElementById("prev-page");
+    const nextPageBtn = document.getElementById("next-page");
+    const pageInput = document.getElementById("page-input");
+
+    if (currentPageSpan) currentPageSpan.textContent = currentPage;
+    else console.warn("分页元素 'current-page' 未找到。");
+
+    if (totalPagesSpan)
+      totalPagesSpan.textContent = total_pages; // 使用传入的 total_pages
+    else console.warn("分页元素 'total-pages' 未找到。");
+
+    if (prevPageBtn) prevPageBtn.disabled = currentPage <= 1;
+    else console.warn("分页元素 'prev-page' 未找到。");
+
+    if (nextPageBtn)
+      nextPageBtn.disabled = currentPage >= total_pages; // 使用传入的 total_pages
+    else console.warn("分页元素 'next-page' 未找到。");
+
+    if (pageInput) pageInput.value = currentPage; // 确保输入框显示当前页码
+  }
+
+  // 渲染表格行
+  function renderTable(data) {
+    const tbody = document.querySelector("tbody");
+    tbody.innerHTML = "";
+
+    // 确定列数，通常是根据表头列数来，这里手动指定为7列
+    const colCount = 7;
+
+    if (data.length === 0) {
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = colCount; /* 图片页面是7列 */
+      cell.textContent = "没有找到匹配的数据。";
+      cell.style.textAlign = "center";
+      cell.style.padding = "40px"; /* 增加 padding 让空状态更美观 */
+      row.appendChild(cell);
+      tbody.appendChild(row);
+      return;
     }
 
-    // 关闭图片模态框
-    function closeModal() {
-        const modal = document.getElementById("image-modal");
-        if (modal) {
-            modal.style.display = "none";
-        }
-    }
+    data.forEach((image) => {
+      const row = document.createElement("tr");
+      // 注意：isManualAnnotation 应该基于后端传回的 confidence 判断
+      const isManualAnnotation = parseFloat(image.confidence) === -1.0; // 后端已将 -1 格式化为 -1.000
 
-    // 从 API 加载页面数据
-    function loadPage(page) {
-        // 确保页码在有效范围内
-        if (totalPages > 0 && (page < 1 || page > totalPages)) {
-            page = Math.max(1, Math.min(page, totalPages)); // 强制修正到有效页码
-            if (page === currentPage) { // 如果修正后还是当前页，则无需加载
-                return;
-            }
-        }
-        currentPage = page;
+      const displayConfidence = parseFloat(image.confidence).toFixed(3); // 格式化置信度为3位小数
+      // 后端 task_data 视图已经将 image.status 字段处理为中文，直接使用
+      const displayStatus = image.status;
 
-        window.showGlobalLoading(); // 显示加载指示器
+      let statusClass = "";
+      if (displayStatus === "已校验") {
+        statusClass = "status-verified";
+      } else if (displayStatus === "未校验") {
+        statusClass = "status-unverified";
+      } else if (displayStatus === "已标注") {
+        // 这个分支对应后端 confidence = -1 的情况
+        statusClass = "status-manual";
+      }
+      // 确保 isManualAnnotation 和 displayStatus === '已标注' 逻辑一致
+      // 如果 isManualAnnotation 为真，displayStatus 一定是 '已标注'
 
-        const urlParams = new URLSearchParams();
-        Object.keys(activeFilters).forEach(type => {
-            const values = Array.from(activeFilters[type]);
-            if (values.length > 0) {
-                urlParams.set(type, values.map(encodeURIComponent).join(',')); // 确保编码
-            }
-        });
-
-        if (activeSort.column) {
-            urlParams.set('sort', `${activeSort.column}:${activeSort.order}`);
-        }
-        urlParams.set('page', currentPage);
-        urlParams.set('page_size', pageSize);
-
-        updateURLParams(); // 更新浏览器URL，但不重载页面
-
-        fetch(`/tasks/${task_id}/data/?${urlParams.toString()}`)
-            .then(response => {
-                if (!response.ok) {
-                    return response.text().then(text => {
-                        console.error("加载数据失败:", response.status, "响应内容:", text);
-                        if (text.startsWith('<!DOCTYPE')) {
-                            throw new Error(`服务器返回 HTML 页面，而非 JSON。可能需要登录或权限。Status: ${response.status}`);
-                        }
-                        throw new Error(`HTTP 错误! 状态: ${response.status} 响应: ${text}`);
-                    });
-                }
-                return response.json();
-            })
-            .then(data => {
-                result = data.results; // 更新全局result变量，以便去噪功能使用
-                renderTable(result);
-                updatePagination(data.page, data.total_pages);
-                applyFiltersDisplayOnly();
-                window.updateStats(); // 在数据加载并渲染表格后更新顶部的统计信息
-            })
-            .catch(error => {
-                console.error('加载数据时出错:', error);
-                window.showMessage('加载数据失败: ' + error.message, 'error');
-                renderTable([]); // 加载失败时清空表格
-                updatePagination(1, 0); // 重置分页
-            })
-            .finally(() => {
-                window.hideGlobalLoading(); // 隐藏加载指示器
-            });
-    }
-
-    // 从输入框跳转到指定页面
-    function goToPage() {
-        const pageInput = document.getElementById('page-input'); // 假设页面上有此元素
-        if (!pageInput) {
-            console.warn("分页元素 'page-input' 未找到。");
-            window.showMessage("无法跳转页面：缺少页码输入框。", "error");
-            return;
-        }
-        const targetPage = parseInt(pageInput.value, 10);
-        if (isNaN(targetPage) || targetPage < 1 || (totalPages > 0 && targetPage > totalPages)) {
-            window.showMessage(`请输入有效的页码 (1-${totalPages})`, 'warning');
-            pageInput.value = '';
-            return;
-        }
-        loadPage(targetPage);
-    }
-
-    // 更新分页控件 (假设 base_task.html 中有这些分页元素)
-    function updatePagination(page, total_pages) {
-        currentPage = page;
-        totalPages = total_pages;
-
-        const currentPageSpan = document.getElementById('current-page');
-        const totalPagesSpan = document.getElementById('total-pages');
-        const prevPageBtn = document.getElementById('prev-page');
-        const nextPageBtn = document.getElementById('next-page');
-        const pageInput = document.getElementById('page-input');
-
-        if (currentPageSpan) currentPageSpan.textContent = currentPage;
-        else console.warn("分页元素 'current-page' 未找到。");
-
-        if (totalPagesSpan) totalPagesSpan.textContent = total_pages; // 使用传入的 total_pages
-        else console.warn("分页元素 'total-pages' 未找到。");
-
-        if (prevPageBtn) prevPageBtn.disabled = currentPage <= 1;
-        else console.warn("分页元素 'prev-page' 未找到。");
-
-        if (nextPageBtn) nextPageBtn.disabled = currentPage >= total_pages; // 使用传入的 total_pages
-        else console.warn("分页元素 'next-page' 未找到。");
-
-        if (pageInput) pageInput.value = currentPage; // 确保输入框显示当前页码
-    }
-
-    // 渲染表格行
-    function renderTable(data) {
-        const tbody = document.querySelector('tbody');
-        tbody.innerHTML = '';
-
-        // 确定列数，通常是根据表头列数来，这里手动指定为7列
-        const colCount = 7; 
-
-        if (data.length === 0) {
-            const row = document.createElement('tr');
-            const cell = document.createElement('td');
-            cell.colSpan = colCount; /* 图片页面是7列 */
-            cell.textContent = '没有找到匹配的数据。';
-            cell.style.textAlign = 'center';
-            cell.style.padding = '40px'; /* 增加 padding 让空状态更美观 */
-            row.appendChild(cell);
-            tbody.appendChild(row);
-            return;
-        }
-
-        data.forEach(image => {
-            const row = document.createElement('tr');
-            // 注意：isManualAnnotation 应该基于后端传回的 confidence 判断
-            const isManualAnnotation = (parseFloat(image.confidence) === -1.000); // 后端已将 -1 格式化为 -1.000
-
-            const displayConfidence = parseFloat(image.confidence).toFixed(3); // 格式化置信度为3位小数
-            // 后端 task_data 视图已经将 image.status 字段处理为中文，直接使用
-            const displayStatus = image.status; 
-
-            let statusClass = '';
-            if (displayStatus === '已校验') {
-                statusClass = 'status-verified';
-            } else if (displayStatus === '未校验') {
-                statusClass = 'status-unverified';
-            } else if (displayStatus === '已标注') { // 这个分支对应后端 confidence = -1 的情况
-                statusClass = 'status-manual';
-            }
-            // 确保 isManualAnnotation 和 displayStatus === '已标注' 逻辑一致
-            // 如果 isManualAnnotation 为真，displayStatus 一定是 '已标注'
-
-            // 操作按钮逻辑
-            let actionButtonsHtml = '';
-            if (isManualAnnotation) {
-                // 人工标注的样本只显示修改按钮
-                actionButtonsHtml = `
+      // 操作按钮逻辑
+      let actionButtonsHtml = "";
+      if (isManualAnnotation) {
+        // 人工标注的样本只显示修改按钮
+        actionButtonsHtml = `
                     <button onclick="editLabel('${image.id}')"
                             class="px-3 py-1 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 transition-colors text-sm">
                         修改
                     </button>
                 `;
-            } else if (displayStatus === '已校验') {
-                // 已校验的样本显示取消按钮
-                actionButtonsHtml = `
+      } else if (displayStatus === "已校验") {
+        // 已校验的样本显示取消按钮
+        actionButtonsHtml = `
                     <button onclick="toggleVerificationStatus('${image.id}', '${displayStatus}')"
                             class="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 transition-colors text-sm mr-2">
                         取消
@@ -839,9 +979,10 @@
                         修改
                     </button>
                 `;
-            } else { // 未校验状态
-                // 未校验的样本显示通过按钮
-                actionButtonsHtml = `
+      } else {
+        // 未校验状态
+        // 未校验的样本显示通过按钮
+        actionButtonsHtml = `
                     <button onclick="toggleVerificationStatus('${image.id}', '${displayStatus}')"
                             class="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors text-sm mr-2">
                         通过
@@ -851,16 +992,16 @@
                         修改
                     </button>
                 `;
-            }
+      }
 
-            // 添加去噪标记的样式
-            let denoisedMark = '';
-            // 只有非人工标注的项才可能被去噪建议
-            if (image.isDenoised && !isManualAnnotation) {
-                denoisedMark = `<span class="text-red-500 font-bold ml-1">(建议修改)</span>`;
-            }
+      // 添加去噪标记的样式
+      let denoisedMark = "";
+      // 只有非人工标注的项才可能被去噪建议
+      if (image.isDenoised && !isManualAnnotation) {
+        denoisedMark = `<span class="text-red-500 font-bold ml-1">(建议修改)</span>`;
+      }
 
-            row.innerHTML = `
+      row.innerHTML = `
                 <td>${image.sequence_number}</td>
                 <td title="${image.image_name}">${image.image_name}</td>
                 <td>
@@ -873,7 +1014,7 @@
                         <span id="label-display-${image.id}"
                             class="p-2"
                             onclick="editLabel('${image.id}')">
-                            ${image.isDenoised && image.denoisedLabel && !isManualAnnotation ? image.denoisedLabel : (image.label || 'N/A')}
+                            ${image.isDenoised && image.denoisedLabel && !isManualAnnotation ? image.denoisedLabel : image.label || "N/A"}
                         </span>
                         ${denoisedMark}
                         <input type="text" id="label-input-${image.id}" value="${image.isDenoised && image.denoisedLabel && !isManualAnnotation ? image.denoisedLabel : image.label}"
@@ -888,242 +1029,281 @@
                     ${actionButtonsHtml}
                 </td>
             `;
-            tbody.appendChild(row);
-        });
-    }
-
-    // 仅更新筛选器头部样式而不触发数据重新加载的函数
-    function applyFiltersDisplayOnly() {
-        ['label', 'confidence', 'status'].forEach(type => {
-            const headerElement = document.querySelector(`#filter-${type} .select-header`);
-            if (headerElement) { // 检查元素是否存在
-                const isActiveFilter = activeFilters[type].size > 0;
-                const isActiveSort = activeSort.column === type && activeSort.order;
-
-                if (isActiveFilter || isActiveSort) {
-                    headerElement.classList.add('filter-active');
-                } else {
-                    headerElement.classList.remove('filter-active');
-                }
-            } else {
-                console.warn(`筛选器头部元素 '#filter-${type} .select-header' 未找到。`);
-            }
-        });
-    }
-
-
-    // 智能去噪相关函数
-    // 打开智能去噪处理中的模态框
-    function showDenoiseProcessingModal() {
-        const modal = document.getElementById("denoise-processing-modal");
-        const loading = modal.querySelector(".loading");
-        const confirmBtn = document.getElementById("denoise-processing-confirm-btn");
-        const cancelBtn = document.getElementById("denoise-processing-cancel-btn");
-        const textElem = document.getElementById("denoise-processing-text");
-
-        if (!modal) {
-            window.showMessage("无法执行去噪：去噪处理模态框未找到。", "error");
-            return;
-        }
-
-        if (loading) loading.classList.add("active");
-        if (confirmBtn) confirmBtn.style.display = 'none'; // 隐藏
-        if (cancelBtn) cancelBtn.style.display = 'none'; // 隐藏
-        if (textElem) textElem.textContent = "正在分析中..."; // 更新文本为“分析中”
-
-        modal.style.display = "flex"; // 显示处理中的模态框
-
-        // 调用后端去噪接口
-        fetch(`/api/tasks/${task_id}/denoise/`, {
-            method: 'POST', // 假设去噪是一个POST请求
-            headers: {
-                'X-CSRFToken': window.getCookie('csrftoken'),
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ /* 如果有需要传递的参数 */ })
-        })
-        .then(response => {
-            if (!response.ok) {
-                return response.text().then(text => {
-                    console.error("服务器返回非2xx状态码:", response.status, "响应内容:", text);
-                    try {
-                        const jsonError = JSON.parse(text);
-                        throw new Error(`服务器错误 (${response.status}): ${jsonError.message || text}`);
-                    } catch (e) {
-                        if (text.startsWith('<!DOCTYPE')) {
-                            throw new Error(`服务器返回 HTML 页面，而非 JSON。可能需要登录或权限。Status: ${response.status}`);
-                        }
-                        throw new Error(`服务器错误 (${response.status}): ${text}`);
-                    }
-                });
-            }
-            return response.json();
-        })
-        .then(data => {
-            if (data.status === 'success') {
-                window.showMessage('智能去噪分析完成！', 'success');
-                let denoisedItemsCount = 0;
-                const denoiseSuggestions = data.denoised_suggestions || [];
-
-                // 遍历当前页面数据，标记哪些项被建议去噪
-                result.forEach(item => {
-                    item.isDenoised = false; // 先重置所有标记
-                    delete item.denoisedLabel;
-
-                    // 只有非人工标注的项才可能被去噪建议
-                    if (parseFloat(item.confidence) !== -1.000) {
-                        const suggestion = denoiseSuggestions.find(s => s.id === item.id);
-                        if (suggestion) {
-                            item.isDenoised = true;
-                            item.denoisedLabel = suggestion.new_label; // 使用后端建议的新标签
-                            denoisedItemsCount++;
-                        }
-                    }
-                });
-
-                renderTable(result); // 渲染表格以显示去噪效果（红字）
-                window.updateStats(); // <--- 去噪分析后，更新顶部的统计
-
-                const denoisePrompt = document.getElementById("denoise-prompt");
-                if (denoisePrompt) {
-                    denoisePrompt.classList.remove("hidden");
-                    const denoiseCount = document.getElementById("denoise-count");
-                    if (denoiseCount) denoiseCount.textContent = denoisedItemsCount;
-                }
-            } else {
-                window.showMessage(`智能去噪失败: ${data.message}`, 'error');
-            }
-        })
-        .catch(error => {
-            console.error('智能去噪请求失败:', error);
-            window.showMessage('智能去噪请求失败或服务器错误：' + error.message, 'error');
-        })
-        .finally(() => {
-            // 不管成功失败，都关闭处理中的模态框
-            hideDenoiseProcessingModal();
-        });
-    }
-
-    // 关闭智能去噪处理中的模态框
-    function hideDenoiseProcessingModal() {
-        const modal = document.getElementById("denoise-processing-modal");
-        if (modal) {
-            modal.style.display = "none";
-        }
-    }
-
-    // DOM 内容加载后初始化加载
-    document.addEventListener('DOMContentLoaded', async function () {
-        // 1. 强制清除 URL 中的筛选和排序参数
-        const url = new URL(location.href);
-        // 删除所有与筛选和排序相关的URL参数
-        url.searchParams.delete('label');
-        url.searchParams.delete('confidence');
-        url.searchParams.delete('status');
-        url.searchParams.delete('sort');
-        // 只保留页码参数，因为用户可能希望刷新后保持当前页
-        const pageFromUrl = parseInt(url.searchParams.get('page'), 10) || 1;
-        // 更新URL，但不触发页面重载
-        history.replaceState({}, '', url.toString());
-
-        // 2. 确保 activeFilters 和 activeSort 在页面加载时是干净的
-        activeFilters = {
-            label: new Set(),
-            confidence: new Set(),
-            status: new Set()
-        };
-        activeSort = { column: null, order: null };
-
-        await fetchAllMetaData(); // 获取标签和置信度元数据并初始化筛选器UI
-
-        // 从 URL 获取页码（此时URL中已无筛选和排序参数，只有页码）
-        loadPage(pageFromUrl); // 加载数据，此时将使用重置后的空筛选和排序状态
-        // 确保在数据加载并渲染表格后更新顶部的统计信息，loadPage 内部已调用，这里再次明确
-        window.updateStats(); 
-
-        const denoiseBtn = document.getElementById("denoise-btn");
-        if (denoiseBtn) {
-            denoiseBtn.addEventListener("click", showDenoiseProcessingModal);
-        } else { console.warn("按钮 'denoise-btn' 未找到。"); }
-
-        const confirmDenoiseBtn = document.getElementById("confirm-denoise-btn");
-        if (confirmDenoiseBtn) {
-            confirmDenoiseBtn.addEventListener("click", async () => {
-                const updatedItems = result.filter(item =>
-                    item.isDenoised && (parseFloat(item.confidence) !== -1.000)
-                ).map(item => ({
-                    id: item.id,
-                    label: item.denoisedLabel || item.label,
-                    // 批量应用去噪结果时，状态应被设置为“已校验”
-                    status: STATUS_MAP_CN_TO_EN['已校验'] 
-                }));
-
-                if (updatedItems.length === 0) {
-                    window.showMessage("没有需要应用去噪结果的非人工标注项。", "warning");
-                    return;
-                }
-
-                if (!confirm(`确认应用 ${updatedItems.length} 条去噪结果吗？`)) {
-                    return;
-                }
-
-                window.showGlobalLoading();
-
-                try {
-                    const response = await fetch(`/tasks/${task_id}/confirm_denoise/`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRFToken': window.getCookie('csrftoken')
-                        },
-                        body: JSON.stringify(updatedItems)
-                    });
-                    if (!response.ok) {
-                        return response.text().then(text => {
-                            console.error("确认去噪失败:", response.status, "响应内容:", text);
-                            try {
-                                const jsonError = JSON.parse(text);
-                                throw new Error(`服务器错误 (${response.status}): ${jsonError.message || text}`);
-                            } catch (e) {
-                                if (text.startsWith('<!DOCTYPE')) {
-                                    throw new Error(`服务器返回 HTML 页面，而非 JSON。可能需要登录或权限。Status: ${response.status}`);
-                                }
-                                throw new Error(`服务器错误 (${response.status}): ${text}`);
-                            }
-                        });
-                    }
-                    const data = await response.json();
-
-                    if (data.status === 'success') {
-                        window.showMessage(data.message || '去噪结果已保存!', 'success');
-                        loadPage(currentPage);
-                        const denoisePrompt = document.getElementById("denoise-prompt");
-                        if (denoisePrompt) denoisePrompt.classList.add("hidden");
-                    } else {
-                        window.showMessage('保存失败: ' + data.message, 'error');
-                    }
-                } catch (err) {
-                    console.error(err);
-                    window.showMessage('网络错误: ' + err.message, 'error');
-                } finally {
-                    window.hideGlobalLoading();
-                }
-            });
-        } else { console.warn("按钮 'confirm-denoise-btn' 未找到。"); }
-
-        const cancelDenoiseBtn = document.getElementById("cancel-denoise-btn");
-        if (cancelDenoiseBtn) {
-            cancelDenoiseBtn.addEventListener("click", () => {
-                result.forEach(item => {
-                    item.isDenoised = false;
-                    delete item.denoisedLabel;
-                });
-                renderTable(result);
-                window.updateStats();
-                const denoisePrompt = document.getElementById("denoise-prompt");
-                if (denoisePrompt) denoisePrompt.classList.add("hidden");
-            });
-        } else { console.warn("按钮 'cancel-denoise-btn' 未找到。"); }
+      tbody.appendChild(row);
     });
+  }
+
+  // 仅更新筛选器头部样式而不触发数据重新加载的函数
+  function applyFiltersDisplayOnly() {
+    ["label", "confidence", "status"].forEach((type) => {
+      const headerElement = document.querySelector(
+        `#filter-${type} .select-header`,
+      );
+      if (headerElement) {
+        // 检查元素是否存在
+        const isActiveFilter = activeFilters[type].size > 0;
+        const isActiveSort = activeSort.column === type && activeSort.order;
+
+        if (isActiveFilter || isActiveSort) {
+          headerElement.classList.add("filter-active");
+        } else {
+          headerElement.classList.remove("filter-active");
+        }
+      } else {
+        console.warn(
+          `筛选器头部元素 '#filter-${type} .select-header' 未找到。`,
+        );
+      }
+    });
+  }
+
+  // 智能去噪相关函数
+  // 打开智能去噪处理中的模态框
+  function showDenoiseProcessingModal() {
+    const modal = document.getElementById("denoise-processing-modal");
+    const loading = modal.querySelector(".loading");
+    const confirmBtn = document.getElementById(
+      "denoise-processing-confirm-btn",
+    );
+    const cancelBtn = document.getElementById("denoise-processing-cancel-btn");
+    const textElem = document.getElementById("denoise-processing-text");
+
+    if (!modal) {
+      window.showMessage("无法执行去噪：去噪处理模态框未找到。", "error");
+      return;
+    }
+
+    if (loading) loading.classList.add("active");
+    if (confirmBtn) confirmBtn.style.display = "none"; // 隐藏
+    if (cancelBtn) cancelBtn.style.display = "none"; // 隐藏
+    if (textElem) textElem.textContent = "正在分析中..."; // 更新文本为“分析中”
+
+    modal.style.display = "flex"; // 显示处理中的模态框
+
+    // 调用后端去噪接口
+    fetch(`/api/tasks/${task_id}/denoise/`, {
+      method: "POST", // 假设去噪是一个POST请求
+      headers: {
+        "X-CSRFToken": window.getCookie("csrftoken"),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        /* 如果有需要传递的参数 */
+      }),
+    })
+      .then((response) => {
+        if (!response.ok) {
+          return response.text().then((text) => {
+            console.error(
+              "服务器返回非2xx状态码:",
+              response.status,
+              "响应内容:",
+              text,
+            );
+            try {
+              const jsonError = JSON.parse(text);
+              throw new Error(
+                `服务器错误 (${response.status}): ${jsonError.message || text}`,
+              );
+            } catch (e) {
+              if (text.startsWith("<!DOCTYPE")) {
+                throw new Error(
+                  `服务器返回 HTML 页面，而非 JSON。可能需要登录或权限。Status: ${response.status}`,
+                );
+              }
+              throw new Error(`服务器错误 (${response.status}): ${text}`);
+            }
+          });
+        }
+        return response.json();
+      })
+      .then((data) => {
+        if (data.status === "success") {
+          window.showMessage("智能去噪分析完成！", "success");
+          let denoisedItemsCount = 0;
+          const denoiseSuggestions = data.denoised_suggestions || [];
+
+          // 遍历当前页面数据，标记哪些项被建议去噪
+          result.forEach((item) => {
+            item.isDenoised = false; // 先重置所有标记
+            delete item.denoisedLabel;
+
+            // 只有非人工标注的项才可能被去噪建议
+            if (parseFloat(item.confidence) !== -1.0) {
+              const suggestion = denoiseSuggestions.find(
+                (s) => s.id === item.id,
+              );
+              if (suggestion) {
+                item.isDenoised = true;
+                item.denoisedLabel = suggestion.new_label; // 使用后端建议的新标签
+                denoisedItemsCount++;
+              }
+            }
+          });
+
+          renderTable(result); // 渲染表格以显示去噪效果（红字）
+          window.updateStats(); // <--- 去噪分析后，更新顶部的统计
+
+          const denoisePrompt = document.getElementById("denoise-prompt");
+          if (denoisePrompt) {
+            denoisePrompt.classList.remove("hidden");
+            const denoiseCount = document.getElementById("denoise-count");
+            if (denoiseCount) denoiseCount.textContent = denoisedItemsCount;
+          }
+        } else {
+          window.showMessage(`智能去噪失败: ${data.message}`, "error");
+        }
+      })
+      .catch((error) => {
+        console.error("智能去噪请求失败:", error);
+        window.showMessage(
+          "智能去噪请求失败或服务器错误：" + error.message,
+          "error",
+        );
+      })
+      .finally(() => {
+        // 不管成功失败，都关闭处理中的模态框
+        hideDenoiseProcessingModal();
+      });
+  }
+
+  // 关闭智能去噪处理中的模态框
+  function hideDenoiseProcessingModal() {
+    const modal = document.getElementById("denoise-processing-modal");
+    if (modal) {
+      modal.style.display = "none";
+    }
+  }
+
+  // DOM 内容加载后初始化加载
+  document.addEventListener("DOMContentLoaded", async function () {
+    // 1. 强制清除 URL 中的筛选和排序参数
+    const url = new URL(location.href);
+    // 删除所有与筛选和排序相关的URL参数
+    url.searchParams.delete("label");
+    url.searchParams.delete("confidence");
+    url.searchParams.delete("status");
+    url.searchParams.delete("sort");
+    // 只保留页码参数，因为用户可能希望刷新后保持当前页
+    const pageFromUrl = parseInt(url.searchParams.get("page"), 10) || 1;
+    // 更新URL，但不触发页面重载
+    history.replaceState({}, "", url.toString());
+
+    // 2. 确保 activeFilters 和 activeSort 在页面加载时是干净的
+    activeFilters = {
+      label: new Set(),
+      confidence: new Set(),
+      status: new Set(),
+    };
+    activeSort = { column: null, order: null };
+
+    await fetchAllMetaData(); // 获取标签和置信度元数据并初始化筛选器UI
+
+    // 从 URL 获取页码（此时URL中已无筛选和排序参数，只有页码）
+    loadPage(pageFromUrl); // 加载数据，此时将使用重置后的空筛选和排序状态
+    // 确保在数据加载并渲染表格后更新顶部的统计信息，loadPage 内部已调用，这里再次明确
+    window.updateStats();
+
+    const denoiseBtn = document.getElementById("denoise-btn");
+    if (denoiseBtn) {
+      denoiseBtn.addEventListener("click", showDenoiseProcessingModal);
+    } else {
+      console.warn("按钮 'denoise-btn' 未找到。");
+    }
+
+    const confirmDenoiseBtn = document.getElementById("confirm-denoise-btn");
+    if (confirmDenoiseBtn) {
+      confirmDenoiseBtn.addEventListener("click", async () => {
+        const updatedItems = result
+          .filter(
+            (item) => item.isDenoised && parseFloat(item.confidence) !== -1.0,
+          )
+          .map((item) => ({
+            id: item.id,
+            label: item.denoisedLabel || item.label,
+            // 批量应用去噪结果时，状态应被设置为“已校验”
+            status: STATUS_MAP_CN_TO_EN["已校验"],
+          }));
+
+        if (updatedItems.length === 0) {
+          window.showMessage("没有需要应用去噪结果的非人工标注项。", "warning");
+          return;
+        }
+
+        if (!confirm(`确认应用 ${updatedItems.length} 条去噪结果吗？`)) {
+          return;
+        }
+
+        window.showGlobalLoading();
+
+        try {
+          const response = await fetch(`/tasks/${task_id}/confirm_denoise/`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-CSRFToken": window.getCookie("csrftoken"),
+            },
+            body: JSON.stringify(updatedItems),
+          });
+          if (!response.ok) {
+            return response.text().then((text) => {
+              console.error(
+                "确认去噪失败:",
+                response.status,
+                "响应内容:",
+                text,
+              );
+              try {
+                const jsonError = JSON.parse(text);
+                throw new Error(
+                  `服务器错误 (${response.status}): ${jsonError.message || text}`,
+                );
+              } catch (e) {
+                if (text.startsWith("<!DOCTYPE")) {
+                  throw new Error(
+                    `服务器返回 HTML 页面，而非 JSON。可能需要登录或权限。Status: ${response.status}`,
+                  );
+                }
+                throw new Error(`服务器错误 (${response.status}): ${text}`);
+              }
+            });
+          }
+          const data = await response.json();
+
+          if (data.status === "success") {
+            window.showMessage(data.message || "去噪结果已保存!", "success");
+            loadPage(currentPage);
+            const denoisePrompt = document.getElementById("denoise-prompt");
+            if (denoisePrompt) denoisePrompt.classList.add("hidden");
+          } else {
+            window.showMessage("保存失败: " + data.message, "error");
+          }
+        } catch (err) {
+          console.error(err);
+          window.showMessage("网络错误: " + err.message, "error");
+        } finally {
+          window.hideGlobalLoading();
+        }
+      });
+    } else {
+      console.warn("按钮 'confirm-denoise-btn' 未找到。");
+    }
+
+    const cancelDenoiseBtn = document.getElementById("cancel-denoise-btn");
+    if (cancelDenoiseBtn) {
+      cancelDenoiseBtn.addEventListener("click", () => {
+        result.forEach((item) => {
+          item.isDenoised = false;
+          delete item.denoisedLabel;
+        });
+        renderTable(result);
+        window.updateStats();
+        const denoisePrompt = document.getElementById("denoise-prompt");
+        if (denoisePrompt) denoisePrompt.classList.add("hidden");
+      });
+    } else {
+      console.warn("按钮 'cancel-denoise-btn' 未找到。");
+    }
+  });
 </script>
 {% endblock %}

@@ -19,7 +19,7 @@ from django.core.paginator import Paginator, EmptyPage
 from django.core.cache import cache
 from django.db.models import F, Case, When, Value, Q, Count, FloatField, Exists, OuterRef, BooleanField
 from django.http import JsonResponse, HttpResponse
-from django.shortcuts import get_object_or_404
+from django.shortcuts import get_object_or_404, redirect
 from django.shortcuts import render
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
@@ -332,7 +332,6 @@ def submit_task(request):
         # 获取提交数据
         task_name = request.POST.get('task_name', '').strip()
         task_type = request.POST.get('task_type', '')
-        classification_scene = request.POST.get('classification_scene', '')
         task_desc = request.POST.get('task_desc', '')
         raw_labeling_type = request.POST.get('labeling_type', '').strip()
         data_file = request.FILES.get('data_file')
@@ -405,7 +404,7 @@ def submit_task(request):
             name=task_name,
             description=task_desc,
             task_type=task_type,
-            classification_scene=classification_scene or None,
+            classification_scene='topic' if task_type == 'text-classification' else None,
             labeling_type=labeling_type,
             data_file=data_file,
             label_file=label_file,
@@ -416,11 +415,8 @@ def submit_task(request):
             progress=0.0,  # 初始化进度字段
         )
 
-        # 若是文本分类且用户选择了情感分析场景，且未上传标注文件，则预置标签为 正面/负面/中性
-        if task.task_type == 'text-classification' and (not task.label_file):
-            if classification_scene == 'sentiment':
-                task.label_list = ['正面', '负面', '中性']
-                task.save(update_fields=['label_list'])
+        # 若是文本分类，预置标签为 正面/负面/中性（已不再区分分类场景，所有文本分类都使用主题分类模式）
+        # 标签配置由用户上传的标注文件决定
 
         # 将上传文件进行解压并处理异常
         try:
@@ -956,8 +952,12 @@ def unlabeled_detail(request, task_id):
     """未标注样本界面（模型预测结果）。"""
     task = get_object_or_404(Task, id=task_id, user=request.user)
 
-    if task.task_type not in ('image-classification', 'text-classification'):
-        return JsonResponse({'status': 'error', 'message': '当前页面仅支持图像分类或文本分类任务'}, status=400)
+    # 文本分类不支持未标注界面，重定向到已标注界面
+    if task.task_type == 'text-classification':
+        return redirect('task_detail', task_id=task_id)
+
+    if task.task_type not in ('image-classification',):
+        return JsonResponse({'status': 'error', 'message': '当前页面仅支持图像分类任务'}, status=400)
 
     config = TASK_CONFIG[task.task_type]
     result_model = config['result_model']
@@ -973,7 +973,7 @@ def unlabeled_detail(request, task_id):
         'unlabeled_count': unlabeled_count,
     })
 
-    template_name = 'platform/tasks/unlabeled_detail_text_h.html' if task.task_type == 'text-classification' else 'platform/tasks/unlabeled_detail_h.html'
+    template_name = 'platform/tasks/unlabeled_detail_h.html'
     return render(request, template_name, context)
 
 

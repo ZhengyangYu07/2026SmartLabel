@@ -1,492 +1,511 @@
 /* 通用表格样式 */
 table {
-    width: 100%;
-    table-layout: fixed;
-    border-collapse: collapse;
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
 }
 
 table th {
-    border: 1px solid #ccc;
-    padding: 0 !important; /* 重要：设置为0，让 custom-select 完全控制内部填充 */
-    text-align: center;
-    position: relative;
-    box-sizing: border-box;
-    background-color: #f2f2f2;
-    white-space: normal; /* 允许th内的文本在极端情况下换行 */
+  border: 1px solid #ccc;
+  padding: 0 !important; /* 重要：设置为0，让 custom-select 完全控制内部填充 */
+  text-align: center;
+  position: relative;
+  box-sizing: border-box;
+  background-color: #f2f2f2;
+  white-space: normal; /* 允许th内的文本在极端情况下换行 */
 }
 
 table td {
-    border: 1px solid #ccc;
-    padding: 8px;
-    text-align: center;
-    overflow: hidden; /* 默认隐藏，特殊列再设置为 visible */
-    white-space: nowrap; /* 默认不换行，特殊列再设置为 normal */
+  border: 1px solid #ccc;
+  padding: 8px;
+  text-align: center;
+  overflow: hidden; /* 默认隐藏，特殊列再设置为 visible */
+  white-space: nowrap; /* 默认不换行，特殊列再设置为 normal */
 }
 
 /* 筛选器/排序下拉菜单样式 (与 text_detail.css 保持一致) */
 table th .custom-select {
-    display: flex;
-    align-items: center;  /* 垂直居中 */
-    justify-content: center;  /* 水平居中：让 select-header 整体在 th 内部居中 */
-    width: 100%;  /* 占据 th 的内容区域宽度 */
-    height: 100%;  /* 占据 th 高度 */
-    position: relative; /* 确保此元素是定位上下文，因为 options-wrapper 绝对定位 */
-    box-sizing: border-box;
-    padding: 2px; /* 给 custom-select 自身增加一点内部 padding */
+  display: flex;
+  align-items: center; /* 垂直居中 */
+  justify-content: center; /* 水平居中：让 select-header 整体在 th 内部居中 */
+  width: 100%; /* 占据 th 的内容区域宽度 */
+  height: 100%; /* 占据 th 高度 */
+  position: relative; /* 确保此元素是定位上下文，因为 options-wrapper 绝对定位 */
+  box-sizing: border-box;
+  padding: 2px; /* 给 custom-select 自身增加一点内部 padding */
 }
 
 table th .custom-select .select-header {
-    display: flex;
-    align-items: center;
-    justify-content: center; /* 让 t-span 和 t-svg 整体在 select-header 内部居中 */
-    width: 100%; /* select-header 填充其父级 custom-select 的宽度 */
-    height: 100%;
-    padding: 5px; /* 统一 padding，四边都为 5px，更紧凑 */
-    box-sizing: border-box; /* 确保 padding 包含在 width/height 内 */
-    cursor: pointer;
-    gap: 1px; /* 文本和图标的间距 */
-    min-width: 0; /* 允许 flex item 自身收缩 */
-    flex-shrink: 1; /* 允许 select-header 在必要时收缩 */
+  display: flex;
+  align-items: center;
+  justify-content: center; /* 让 t-span 和 t-svg 整体在 select-header 内部居中 */
+  width: 100%; /* select-header 填充其父级 custom-select 的宽度 */
+  height: 100%;
+  padding: 5px; /* 统一 padding，四边都为 5px，更紧凑 */
+  box-sizing: border-box; /* 确保 padding 包含在 width/height 内 */
+  cursor: pointer;
+  gap: 1px; /* 文本和图标的间距 */
+  min-width: 0; /* 允许 flex item 自身收缩 */
+  flex-shrink: 1; /* 允许 select-header 在必要时收缩 */
 }
 
 table th .custom-select .select-header .t-span {
-    white-space: nowrap; /* 文本不换行 */
-    overflow: hidden; /* 隐藏超出部分 */
-    text-overflow: ellipsis; /* 显示省略号 */
-    min-width: 0; /* 允许 flex 元素在必要时收缩到最小内容宽度 */
-    flex-shrink: 1; /* 关键：允许文本在空间不足时收缩 */
+  white-space: nowrap; /* 文本不换行 */
+  overflow: hidden; /* 隐藏超出部分 */
+  text-overflow: ellipsis; /* 显示省略号 */
+  min-width: 0; /* 允许 flex 元素在必要时收缩到最小内容宽度 */
+  flex-shrink: 1; /* 关键：允许文本在空间不足时收缩 */
 }
 
 table th .custom-select .select-header .t-svg {
-    transition: transform 0.3s;
-    flex-shrink: 0;  /* 确保图标不会被压缩 */
-    margin-left: 0; /* 移除可能的默认外边距 */
-    width: 12px;
-    height: 12px;
+  transition: transform 0.3s;
+  flex-shrink: 0; /* 确保图标不会被压缩 */
+  margin-left: 0; /* 移除可能的默认外边距 */
+  width: 12px;
+  height: 12px;
 }
 
 table th .custom-select .options-wrapper {
-    position: absolute;
-    top: calc(100% + 5px);
-    left: 50%;
-    transform: translateX(-50%);
-    min-width: 180px;
-    width: 120%; /* 相对于父元素宽度略宽 */
-    background: white;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-    max-height: 300px;
-    overflow-y: auto;
-    display: none;
-    z-index: 1500 !important; /* 确保层级最高 */
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 180px;
+  width: 120%; /* 相对于父元素宽度略宽 */
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  max-height: 300px;
+  overflow-y: auto;
+  display: none;
+  z-index: 1500 !important; /* 确保层级最高 */
 }
 
 .option-item {
-    height: 30px;
-    white-space: nowrap;
-    display: flex;
-    align-items: center;
-    padding: 5px 10px;
-    cursor: pointer; /* 确保所有选项都是可点击的 */
+  height: 30px;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  padding: 5px 10px;
+  cursor: pointer; /* 确保所有选项都是可点击的 */
 }
 .option-item:hover {
-    background-color: #f0f0f0;
+  background-color: #f0f0f0;
 }
 .option-item input[type="checkbox"] {
-    margin-right: 5px;
+  margin-right: 5px;
 }
 
 .select-header.filter-active {
-    color: #3b82f6;
-    font-weight: bold;
-    border-bottom: 2px solid #3b82f6;
+  color: #3b82f6;
+  font-weight: bold;
+  border-bottom: 2px solid #3b82f6;
 }
 
 .option-item.sort-option {
-    font-weight: bold;
-    background-color: #f0f0f0;
-    cursor: pointer;
+  font-weight: bold;
+  background-color: #f0f0f0;
+  cursor: pointer;
 }
 
 .option-item.sort-option:hover {
-    background-color: #e0e0e0;
+  background-color: #e0e0e0;
 }
 
 .option-item.reset-filter-option {
-    font-weight: bold;
-    color: #dc3545;
-    background-color: #ffe0e0;
-    cursor: pointer;
-    margin-top: 5px;
-    border-top: 1px solid #ddd;
-    padding-top: 10px;
+  font-weight: bold;
+  color: #dc3545;
+  background-color: #ffe0e0;
+  cursor: pointer;
+  margin-top: 5px;
+  border-top: 1px solid #ddd;
+  padding-top: 10px;
 }
 
 .option-item.reset-filter-option:hover {
-    background-color: #ffc0c0;
+  background-color: #ffc0c0;
 }
 
 .search-box {
-    padding: 5px 10px;
-    border-bottom: 1px solid #eee;
+  padding: 5px 10px;
+  border-bottom: 1px solid #eee;
 }
 .search-box input {
-    width: 100%;
-    padding: 5px;
-    border: 1px solid #ddd;
-    border-radius: 3px;
-    box-sizing: border-box;
+  width: 100%;
+  padding: 5px;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  box-sizing: border-box;
 }
 
 /* Modal styles (通用模态框，用于显示图片或文本) */
 .modal {
-    display: flex;
-    position: fixed;
-    z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(255, 255, 255, 0.7); /* 半透明背景 */
-    align-items: center;
-    justify-content: center;
+  display: flex;
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(255, 255, 255, 0.7); /* 半透明背景 */
+  align-items: center;
+  justify-content: center;
 }
 
 .modal-content {
-    background-color: white !important; /* 确保是白色背景 */
-    padding: 20px !important;
-    border-radius: 8px !important;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2) !important;
-    position: relative;
-    overflow: auto; /* 确保内容溢出时可滚动 */
-    display: flex; /* 内部内容也使用 flex 布局 */
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
+  background-color: white !important; /* 确保是白色背景 */
+  padding: 20px !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2) !important;
+  position: relative;
+  overflow: auto; /* 确保内容溢出时可滚动 */
+  display: flex; /* 内部内容也使用 flex 布局 */
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
 /* 针对图片模态框的特定调整 */
 #image-modal .modal-content {
-    background: none !important; /* 图片模态框背景透明 */
-    box-shadow: none !important; /* 图片模态框无阴影 */
-    max-width: 90%;
-    max-height: 90%;
+  background: none !important; /* 图片模态框背景透明 */
+  box-shadow: none !important; /* 图片模态框无阴影 */
+  max-width: 98%;
+  max-height: 96%;
 }
 #image-modal .modal-content img {
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
-    border-radius: 8px;
-    box-shadow: 0 0 20px rgba(0, 0, 0, 0.5); /* 图片本身带阴影 */
-    /* 最小尺寸，防止图片过小导致模态框太小 */
-    min-width: 300px;
-    min-height: 200px;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.5); /* 图片本身带阴影 */
+  /* 最小尺寸，防止图片过小导致模态框太小 */
+  min-width: 300px;
+  min-height: 200px;
 }
 
 .close {
-    position: absolute;
-    top: -10px; /* 调整位置，使其在模态框外部 */
-    right: -10px;
-    background: white;
-    color: black;
-    border-radius: 50%;
-    width: 30px;
-    height: 30px;
-    text-align: center;
-    line-height: 30px;
-    font-size: 24px;
-    font-weight: bold;
-    cursor: pointer;
-    box-shadow: 0 0 5px rgba(0, 0, 0, 0.3);
+  position: absolute;
+  top: -10px; /* 调整位置，使其在模态框外部 */
+  right: -10px;
+  background: white;
+  color: black;
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  text-align: center;
+  line-height: 30px;
+  font-size: 24px;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.3);
 }
 
 .close:hover {
-    background: #f1f1f1;
+  background: #f1f1f1;
 }
 
 /* 列宽设置 */
 th:nth-child(1),
-td:nth-child(1) { /* ID */
-    width: 50px;
+td:nth-child(1) {
+  /* ID */
+  width: 50px;
 }
 
 th:nth-child(2),
-td:nth-child(2) { /* 文件名 */
-    width: 200px;
-    padding-left: 10px;
+td:nth-child(2) {
+  /* 文件名 */
+  width: 200px;
+  padding-left: 10px;
 }
 
 th:nth-child(3),
-td:nth-child(3) { /* 内容（图片预览） */
-    width: 50px;
+td:nth-child(3) {
+  /* 内容（图片预览） */
+  width: 50px;
 }
-td:nth-child(3) img { /* 图片预览样式 */
-    width: 48px; /* 统一图片预览大小 */
-    height: 48px;
-    object-fit: cover;
-    cursor: pointer;
-    margin: 0 auto;
-    border-radius: 4px;
+td:nth-child(3) img {
+  /* 图片预览样式 */
+  width: 48px; /* 统一图片预览大小 */
+  height: 48px;
+  object-fit: cover;
+  cursor: pointer;
+  margin: 0 auto;
+  border-radius: 4px;
 }
 
 th:nth-child(4),
-td:nth-child(4) { /* 预测标签 */
-    width: 220px;
-    overflow: visible; /* 保持可见以允许编辑框弹出 */
+td:nth-child(4) {
+  /* 预测标签 */
+  width: 220px;
+  overflow: visible; /* 保持可见以允许编辑框弹出 */
 }
 
 /* 确保 label-display, label-input, save-button, selectedId 在编辑模式下能够正确布局和宽度 */
-.relative.block { /* 用于包裹编辑标签相关元素的容器 */
-    position: relative;
-    width: 100%;
-    display: flex; /* 让 span, input, button 在一行 */
-    align-items: center;
-    justify-content: center; /* 默认居中显示 */
-    box-sizing: border-box;
-    padding: 2px; /* 给这个容器也加一点padding，避免内容太贴边 */
+.relative.block {
+  /* 用于包裹编辑标签相关元素的容器 */
+  position: relative;
+  width: 100%;
+  display: flex; /* 让 span, input, button 在一行 */
+  align-items: center;
+  justify-content: center; /* 默认居中显示 */
+  box-sizing: border-box;
+  padding: 2px; /* 给这个容器也加一点padding，避免内容太贴边 */
 }
 
-span[id^="label-display-"] { /* 标签显示模式的样式 */
-    display: block; /* 确保它独占一行或能控制宽度 */
-    width: 100%; /* 撑开可用宽度 */
-    padding: 2px 0;
-    text-align: center;
-    cursor: pointer;
-    box-sizing: border-box;
-    white-space: nowrap; /* 文本不换行 */
-    overflow: hidden; /* 隐藏溢出文本 */
-    text-overflow: ellipsis; /* 显示省略号 */
+span[id^="label-display-"] {
+  /* 标签显示模式的样式 */
+  display: block; /* 确保它独占一行或能控制宽度 */
+  width: 100%; /* 撑开可用宽度 */
+  padding: 2px 0;
+  text-align: center;
+  cursor: pointer;
+  box-sizing: border-box;
+  white-space: nowrap; /* 文本不换行 */
+  overflow: hidden; /* 隐藏溢出文本 */
+  text-overflow: ellipsis; /* 显示省略号 */
 }
 
-input[id^="label-input-"] { /* 标签输入框样式 */
-    flex-grow: 1; /* 允许输入框填充可用空间 */
-    padding: 4px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    box-sizing: border-box;
-    min-width: 80px; /* 最小宽度，防止过小 */
-    max-width: 100%; /* 限制最大宽度不超过父容器 */
+input[id^="label-input-"] {
+  /* 标签输入框样式 */
+  flex-grow: 1; /* 允许输入框填充可用空间 */
+  padding: 4px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+  min-width: 80px; /* 最小宽度，防止过小 */
+  max-width: 100%; /* 限制最大宽度不超过父容器 */
 }
 
-button[id^="save-button-"] { /* 保存按钮样式 */
-    flex-shrink: 0; /* 防止按钮被压缩 */
-    margin-left: 5px;
-    padding: 4px 8px;
-    background-color: #3b82f6;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
+button[id^="save-button-"] {
+  /* 保存按钮样式 */
+  flex-shrink: 0; /* 防止按钮被压缩 */
+  margin-left: 5px;
+  padding: 4px 8px;
+  background-color: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
 }
 
-ul.selectedId { /* 标签建议列表样式 */
-    position: absolute;
-    background-color: white;
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    white-space: nowrap;
-    max-height: 200px;
-    overflow-y: auto;
-    z-index: 100;
-    text-align: left;
-    border: 1px solid #ccc;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-    top: 100%;
-    left: 0;
-    width: 100%; /* 让建议列表的宽度和输入框保持一致 */
-    box-sizing: border-box;
+ul.selectedId {
+  /* 标签建议列表样式 */
+  position: absolute;
+  background-color: white;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  white-space: nowrap;
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 100;
+  text-align: left;
+  border: 1px solid #ccc;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+  top: 100%;
+  left: 0;
+  width: 100%; /* 让建议列表的宽度和输入框保持一致 */
+  box-sizing: border-box;
 }
 
 ul.selectedId li {
-    padding: 8px 10px;
-    cursor: pointer;
+  padding: 8px 10px;
+  cursor: pointer;
 }
 
 ul.selectedId li:hover {
-    background-color: #f0f0f0;
+  background-color: #f0f0f0;
 }
 
 th:nth-child(5),
-td:nth-child(5) { /* 置信度 */
-    width: 100px;
+td:nth-child(5) {
+  /* 置信度 */
+  width: 100px;
 }
 
 th:nth-child(6),
-td:nth-child(6) { /* 状态 */
-    width: 100px;
+td:nth-child(6) {
+  /* 状态 */
+  width: 100px;
 }
 
 th:nth-child(7),
-td:nth-child(7) { /* 操作 */
-    width: 150px;
-    white-space: nowrap;
-    padding: 0 5px;
+td:nth-child(7) {
+  /* 操作 */
+  width: 150px;
+  white-space: nowrap;
+  padding: 0 5px;
 }
 td:nth-child(7) button {
-    margin: 2px;
-    padding: 4px 8px;
-    font-size: 0.8em;
+  margin: 2px;
+  padding: 4px 8px;
+  font-size: 0.8em;
 }
 
 /* 状态标签样式 (与 text_detail.css 保持一致) */
 .status-verified {
-    background-color: #d4edda !important;
-    color: #155724 !important;
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-weight: 500;
-    border: 1px solid #c3e6cb;
-    display: inline-block; /* 确保其能应用 padding 和 border */
+  background-color: #d4edda !important;
+  color: #155724 !important;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+  border: 1px solid #c3e6cb;
+  display: inline-block; /* 确保其能应用 padding 和 border */
 }
 
 .status-unverified {
-    background-color: #fff3cd !important;
-    color: #856404 !important;
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-weight: 500;
-    border: 1px solid #ffeaa7;
-    display: inline-block;
+  background-color: #fff3cd !important;
+  color: #856404 !important;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+  border: 1px solid #ffeaa7;
+  display: inline-block;
 }
 
-.status-manual { /* 已标注 */
-    background-color: #e2e3f1 !important;
-    color: #6f42c1 !important;
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-weight: 500;
-    border: 1px solid #c5c6d8;
-    display: inline-block;
+.status-manual {
+  /* 已标注 */
+  background-color: #e2e3f1 !important;
+  color: #6f42c1 !important;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+  border: 1px solid #c5c6d8;
+  display: inline-block;
 }
 
 td[data-status] {
-    text-align: center;
-    vertical-align: middle;
+  text-align: center;
+  vertical-align: middle;
 }
 
 /* 智能去噪处理中的模态框 (与 text_detail.css 保持一致) */
 #denoise-processing-modal .modal-content {
-    width: 320px;
-    padding: 28px 32px 24px;
-    background: #fff;
-    border-radius: 12px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, .15);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 16px;
+  width: 320px;
+  padding: 28px 32px 24px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
 }
 #denoise-processing-modal h3 {
-    margin: 0;
-    font-size: 20px;
-    font-weight: 600;
-    color: #222;
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #222;
 }
 #denoise-processing-modal p {
-    margin: 0;
-    font-size: 14px;
-    color: #555;
+  margin: 0;
+  font-size: 14px;
+  color: #555;
 }
 #denoise-processing-modal .loading {
-    display: none;
-    margin-bottom: 10px;
+  display: none;
+  margin-bottom: 10px;
 }
 #denoise-processing-modal .loading.active {
-    display: inline-block;
+  display: inline-block;
 }
 /* 当 loading active 时，按钮应禁用并透明 */
 #denoise-processing-modal .loading.active + .flex button {
-    pointer-events: none;
-    opacity: 0.5;
+  pointer-events: none;
+  opacity: 0.5;
 }
 #denoise-processing-modal .loading-spinner {
-    border: 5px solid #f3f3f3;
-    border-top: 5px solid #3b82f6;
-    border-radius: 50%;
-    width: 30px;
-    height: 30px;
-    animation: spin 1s linear infinite;
+  border: 5px solid #f3f3f3;
+  border-top: 5px solid #3b82f6;
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  animation: spin 1s linear infinite;
 }
 @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 /* 按钮样式（用于去噪模态框） */
 #denoise-processing-modal button {
-    width: 96px;
-    height: 36px;
-    border: none;
-    border-radius: 6px;
-    font-size: 14px;
-    cursor: pointer;
-    transition: all .2s;
+  width: 96px;
+  height: 36px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
 }
 #denoise-processing-modal #denoise-processing-confirm-btn {
-    background: #1677ff;
-    color: #fff;
+  background: #1677ff;
+  color: #fff;
 }
 #denoise-processing-modal #denoise-processing-confirm-btn:disabled {
-    background: #b3d0ff;
-    color: #fff;
-    cursor: not-allowed;
+  background: #b3d0ff;
+  color: #fff;
+  cursor: not-allowed;
 }
 #denoise-processing-modal #denoise-processing-cancel-btn {
-    background: #f2f2f2;
-    color: #333;
+  background: #f2f2f2;
+  color: #333;
 }
 #denoise-processing-modal #denoise-processing-cancel-btn:hover {
-    background: #e6e6e6;
+  background: #e6e6e6;
 }
 
 /* 全局加载覆盖层（与 base_task.html 中的 showGlobalLoading/hideGlobalLoading 配合）*/
 .loading-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(255, 255, 255, 0.8);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 9999;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(255, 255, 255, 0.8);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
 }
 
-.loading-overlay .loading-spinner { /* 使用更粗的加载条 */
-    border: 8px solid #f3f3f3;
-    border-top: 8px solid #3b82f6;
-    border-radius: 50%;
-    width: 60px;
-    height: 60px;
-    animation: spin 1s linear infinite;
+.loading-overlay .loading-spinner {
+  /* 使用更粗的加载条 */
+  border: 8px solid #f3f3f3;
+  border-top: 8px solid #3b82f6;
+  border-radius: 50%;
+  width: 60px;
+  height: 60px;
+  animation: spin 1s linear infinite;
 }
 
 /* 表格空状态提示 */
 .overflow-x-auto {
-    min-height: 300px; /* 确保有最小高度，防止表格内容少时页面塌陷 */
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-start;
-    align-items: center;
+  min-height: 300px; /* 确保有最小高度，防止表格内容少时页面塌陷 */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
 }
 
 table tbody tr td[colspan] {
-    white-space: normal;
-    padding: 40px; /* 增加 padding 让空状态更美观 */
+  white-space: normal;
+  padding: 40px; /* 增加 padding 让空状态更美观 */
 }
 
 /* 屏幕点击覆盖层（用于点击下拉菜单外部时关闭） */
 .screen-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0,0,0,0); /* 完全透明 */
-    z-index: 90; /* 在下拉菜单之下，但高于其他页面内容 */
-    pointer-events: none; /* 默认不拦截鼠标事件 */
-    display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0); /* 完全透明 */
+  z-index: 90; /* 在下拉菜单之下，但高于其他页面内容 */
+  pointer-events: none; /* 默认不拦截鼠标事件 */
+  display: none;
 }

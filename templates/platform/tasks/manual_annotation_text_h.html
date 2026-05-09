@@ -1,4 +1,4 @@
-{% extends 'platform/components/base_task_h.html' %} {% block task_page_title%}人工标注{% endblock %} {% block task_details %}
+{% extends 'platform/components/base_task_h.html' %} {% block task_page_title%}未标注{% endblock %} {% block task_details %}
 <style>
   .candidate-item {
     cursor: pointer;
@@ -56,6 +56,8 @@
         >
           <option value="uncertainty_desc">不确定性：高→低</option>
           <option value="uncertainty_asc">不确定性：低→高</option>
+          <option value="confidence_desc">置信度：高→低</option>
+          <option value="confidence_asc">置信度：低→高</option>
         </select>
         <button
           id="reload-candidates-btn"
@@ -229,6 +231,10 @@
         status: "未校验",
       });
       if (sortVal === "uncertainty_asc") params.set("sort", "uncertainty:asc");
+      else if (sortVal === "confidence_desc")
+        params.set("sort", "confidence:desc");
+      else if (sortVal === "confidence_asc")
+        params.set("sort", "confidence:asc");
       else params.set("sort", "uncertainty:desc");
 
       const response = await fetch(
@@ -240,7 +246,7 @@
       const data = await response.json();
       totalPages = data.total_pages || 1;
       const filtered = (data.results || []).filter(
-        (item) => item.status === "未校验",
+        (item) => item.status === "未校验" && item.confidence !== "-1.000",
       );
       results.push(...filtered);
       page += 1;
@@ -251,6 +257,14 @@
         (a, b) =>
           parseFloat(a.uncertainty_score || 0) -
           parseFloat(b.uncertainty_score || 0),
+      );
+    } else if (sortVal === "confidence_desc") {
+      results.sort(
+        (a, b) => parseFloat(b.confidence || 0) - parseFloat(a.confidence || 0),
+      );
+    } else if (sortVal === "confidence_asc") {
+      results.sort(
+        (a, b) => parseFloat(a.confidence || 0) - parseFloat(b.confidence || 0),
       );
     } else {
       results.sort(
@@ -289,6 +303,7 @@
         </div>
         <div class="text-xs text-gray-600 line-clamp-2 mb-2">${(item.content || "").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
         <div class="text-xs text-gray-500">预测标签: ${item.predicted_label ?? item.label ?? "-"}</div>
+        <div class="text-xs text-gray-500">置信度: ${normalizeConfidence(item.confidence)}</div>
         <div class="text-xs text-gray-500">不确定性: ${normalizeConfidence(item.uncertainty_score ?? item.confidence)}</div>
       `;
       itemEl.addEventListener("click", () => selectCandidate(index));
