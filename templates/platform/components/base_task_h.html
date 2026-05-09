@@ -45,6 +45,40 @@
       </div>
 
       <div class="flex items-center flex-wrap gap-2">
+        <div id="global-delete-wrap" class="relative group mr-1">
+          <button
+            id="global-delete-btn"
+            type="button"
+            class="inline-flex h-10 w-10 items-center justify-center rounded-full bg-rose-500 text-white text-lg font-semibold shadow-md ring-2 ring-rose-100 transition-all hover:bg-rose-600 hover:scale-105 disabled:cursor-not-allowed disabled:opacity-60"
+            aria-label="删除任务"
+          >
+            🗑
+          </button>
+          <div
+            class="pointer-events-none absolute left-1/2 top-full mt-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 px-3 py-1 text-xs font-medium text-white opacity-0 transition-opacity group-hover:opacity-100"
+          >
+            删除任务
+          </div>
+        </div>
+
+        {% if task.task_type == 'image-classification' or task.task_type == 'text-classification' %}
+        <div id="global-rerun-wrap" class="relative group mr-1">
+          <button
+            id="global-rerun-btn"
+            type="button"
+            class="inline-flex h-10 w-10 items-center justify-center rounded-full bg-amber-300 text-slate-900 text-xl font-semibold shadow-md ring-2 ring-amber-100 transition-all hover:bg-amber-400 hover:scale-105 disabled:cursor-not-allowed disabled:opacity-60"
+            aria-label="重新训练"
+          >
+            ⚡
+          </button>
+          <div
+            class="pointer-events-none absolute left-1/2 top-full mt-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-900 px-3 py-1 text-xs font-medium text-white opacity-0 transition-opacity group-hover:opacity-100"
+          >
+            重新训练
+          </div>
+        </div>
+        {% endif %}
+
         <span class="text-xs uppercase tracking-[0.25em] text-white/60 mr-1"
           >界面</span
         >
@@ -138,8 +172,10 @@
           {% if task.task_type == 'text-classification' and task_view_mode == 'labeled' %} 
           {{ task.manual_annotated_count|default:"0" }} 
           {% elif task.task_type == 'text-classification' and task_view_mode == 'manual'%} 
-          {{ unlabeled_count|default:"0" }} {% elif task_view_mode == 'unlabeled' %}
-          {{ task.uploaded_total|default:"0" }} {% else %} {{task.total_count|default:"0" }} {% endif %}
+          {{ unlabeled_count|default:"0" }} 
+          {% elif task_view_mode == 'unlabeled' %} 
+          {{ task.uploaded_total|default:"0" }} {% else %}
+          {{task.total_count|default:"0" }} {% endif %}
         </dd>
       </div>
       <div class="flex flex-col">
@@ -570,6 +606,122 @@
     return cookieValue;
   }
 
+  let rerunRequestInFlight = false;
+  let deleteRequestInFlight = false;
+
+  async function parseApiResponse(response) {
+    const contentType = response.headers.get("content-type") || "";
+    const responseText = await response.text();
+
+    if (contentType.includes("application/json")) {
+      return JSON.parse(responseText || "{}");
+    }
+
+    try {
+      return JSON.parse(responseText || "{}");
+    } catch (error) {
+      return {
+        status: "error",
+        message: responseText || `请求失败（HTTP ${response.status}）`,
+      };
+    }
+  }
+
+  window.deleteTaskGlobal = async function () {
+    if (deleteRequestInFlight) {
+      return;
+    }
+
+    const confirmed = confirm(
+      "确认删除这个任务吗？如果任务正在进行，系统会同步撤销 Celery 任务并清理队列中的残留消息。",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const btn = document.getElementById("global-delete-btn");
+    deleteRequestInFlight = true;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "…";
+    }
+
+    try {
+      const response = await fetch(`/api/tasks/{{ task.id }}/`, {
+        method: "DELETE",
+        headers: { "X-CSRFToken": getCookie("csrftoken") },
+      });
+
+      const data = await parseApiResponse(response);
+      if (!response.ok || data.status !== "success") {
+        throw new Error(data.message || "删除失败");
+      }
+
+      showMessage(data.message || "任务已删除", "success", 2000);
+      setTimeout(() => {
+        location.href = "{% url 'manage_task' %}";
+      }, 900);
+    } catch (error) {
+      console.error("删除任务失败:", error);
+      showMessage(error.message || "删除失败", "error");
+    } finally {
+      deleteRequestInFlight = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "🗑";
+      }
+    }
+  };
+
+  window.rerunSemiSupervisedGlobal = async function () {
+    if (rerunRequestInFlight) {
+      return;
+    }
+
+    const confirmed = confirm(
+      "确认重新调用半监督算法吗？系统会基于当前人工标注结果重新训练。",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const btn = document.getElementById("global-rerun-btn");
+    rerunRequestInFlight = true;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "…";
+    }
+
+    try {
+      const response = await fetch(
+        `/tasks/{{ task.id }}/manual_annotation/rerun/`,
+        {
+          method: "POST",
+          headers: { "X-CSRFToken": getCookie("csrftoken") },
+        },
+      );
+
+      const data = await parseApiResponse(response);
+      if (!response.ok || data.status !== "success") {
+        throw new Error(data.message || "重新调用失败");
+      }
+
+      showMessage(data.message || "已重新调用半监督算法", "success", 2200);
+      setTimeout(() => {
+        location.reload();
+      }, 1200);
+    } catch (error) {
+      console.error("重新调用半监督算法失败:", error);
+      showMessage(error.message || "重新调用失败", "error");
+    } finally {
+      rerunRequestInFlight = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "⚡";
+      }
+    }
+  };
+
   // 更新统计面板的函数（仅更新顶部概览统计，与子模板的职能分离）
   window.updateStats = async function () {
     try {
@@ -730,6 +882,15 @@
 
     // 初始化时也调用一次统计刷新，确保数据最新
     window.updateStats();
+
+    const rerunBtn = document.getElementById("global-rerun-btn");
+    const deleteBtn = document.getElementById("global-delete-btn");
+    if (deleteBtn) {
+      deleteBtn.addEventListener("click", window.deleteTaskGlobal);
+    }
+    if (rerunBtn) {
+      rerunBtn.addEventListener("click", window.rerunSemiSupervisedGlobal);
+    }
   });
 
   // 页面卸载前清理所有定时器

@@ -7,19 +7,13 @@
 </style>
 {% endblock %} {% block task_table %}
 <div
-  class="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800 flex items-center justify-between gap-4"
+  class="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800"
 >
   <div>
     左侧列表按不确定性优先排序。当前共有
     <span id="manual-unlabeled-count">{{ unlabeled_count|default:0 }}</span>
     条未标注样本。标注完成后点击“保存并下一张”，系统会把该样本记为人工标注，并在后续重新调用半监督算法时纳入训练。
   </div>
-  <button
-    id="rerun-btn"
-    class="whitespace-nowrap rounded-md bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700 transition-colors"
-  >
-    重新调用半监督算法
-  </button>
 </div>
 
 <div
@@ -115,12 +109,18 @@
           <label class="block text-sm font-medium text-gray-700 mb-2"
             >人工标签</label
           >
-          <input
-            id="manual-label-input"
-            type="text"
-            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
-            placeholder="请输入正确标签"
-          />
+          <div class="relative">
+            <input
+              id="manual-label-input"
+              type="text"
+              class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+              placeholder="请输入正确标签"
+            />
+            <ul
+              id="label-suggestions"
+              class="absolute top-full left-0 right-0 bg-white border border-gray-300 border-t-0 rounded-b-lg hidden max-h-48 overflow-y-auto z-50"
+            ></ul>
+          </div>
         </div>
 
         <div class="grid grid-cols-1 gap-3 mt-auto">
@@ -146,6 +146,7 @@
   const taskId = "{{ task.id }}";
   let candidateItems = [];
   let currentCandidateIndex = -1;
+  let allLabels = new Set(); // 存储所有可能的标签
 
   function getCookie(name) {
     let cookieValue = null;
@@ -172,6 +173,68 @@
 
   function normalizeConfidence(value) {
     return Number.parseFloat(value || 0).toFixed(3);
+  }
+
+  // 从后端获取所有标签
+  async function fetchAllLabels() {
+    try {
+      const response = await fetch(`/api/tasks/${taskId}/meta_data/`);
+      if (!response.ok) {
+        console.error("获取标签失败:", response.status);
+        return;
+      }
+      const data = await response.json();
+      if (data.status === "success" && data.labels) {
+        allLabels.clear();
+        data.labels.forEach((label) => allLabels.add(label));
+      }
+    } catch (error) {
+      console.error("获取标签时出错:", error);
+    }
+  }
+
+  // 过滤标签函数
+  function filterLabels(searchText) {
+    if (!searchText.trim()) {
+      return Array.from(allLabels).slice(0, 10); // 默认显示前10个
+    }
+    const lowerSearch = searchText.toLowerCase();
+    return Array.from(allLabels)
+      .filter((label) => label.toLowerCase().includes(lowerSearch))
+      .slice(0, 10); // 最多显示10个
+  }
+
+  // 显示标签建议列表
+  function showLabelSuggestions(searchText) {
+    const suggestions = document.getElementById("label-suggestions");
+    const filtered = filterLabels(searchText);
+
+    suggestions.innerHTML = "";
+
+    if (filtered.length === 0) {
+      suggestions.classList.add("hidden");
+      return;
+    }
+
+    filtered.forEach((label) => {
+      const li = document.createElement("li");
+      li.className =
+        "px-4 py-2 cursor-pointer hover:bg-indigo-100 text-gray-700";
+      li.textContent = label;
+      li.onclick = () => {
+        document.getElementById("manual-label-input").value = label;
+        suggestions.classList.add("hidden");
+      };
+      suggestions.appendChild(li);
+    });
+
+    suggestions.classList.remove("hidden");
+  }
+
+  // 隐藏标签建议列表
+  function hideLabelSuggestions() {
+    const suggestions = document.getElementById("label-suggestions");
+    suggestions.classList.add("hidden");
   }
 
   async function fetchAllCandidates() {
@@ -368,21 +431,6 @@
     }
   }
 
-  async function rerunSemiSupervised() {
-    const response = await fetch(`/tasks/${taskId}/manual_annotation/rerun/`, {
-      method: "POST",
-      headers: { "X-CSRFToken": getCookie("csrftoken") },
-    });
-
-    const data = await response.json();
-    if (!response.ok || data.status !== "success") {
-      throw new Error(data.message || "重新调用失败");
-    }
-
-    showToast(data.message || "已重新调用半监督算法", "success");
-    setTimeout(() => window.location.reload(), 1200);
-  }
-
   async function initPage() {
     try {
       candidateItems = await fetchAllCandidates();
@@ -415,14 +463,6 @@
   document
     .getElementById("reload-candidates-btn")
     .addEventListener("click", async () => initPage());
-  document.getElementById("rerun-btn").addEventListener("click", async () => {
-    try {
-      await rerunSemiSupervised();
-    } catch (error) {
-      console.error(error);
-      showToast(error.message, "error");
-    }
-  });
 
   document
     .getElementById("manual-label-input")
@@ -438,6 +478,29 @@
       }
     });
 
-  document.addEventListener("DOMContentLoaded", initPage);
+  // 标签输入框事件监听
+  document
+    .getElementById("manual-label-input")
+    .addEventListener("input", (event) => {
+      showLabelSuggestions(event.target.value);
+    });
+
+  document
+    .getElementById("manual-label-input")
+    .addEventListener("focus", (event) => {
+      showLabelSuggestions(event.target.value);
+    });
+
+  document
+    .getElementById("manual-label-input")
+    .addEventListener("blur", () => {
+      // 延迟隐藏，以便用户点击列表项
+      setTimeout(hideLabelSuggestions, 200);
+    });
+
+  document.addEventListener("DOMContentLoaded", async () => {
+    await fetchAllLabels();
+    await initPage();
+  });
 </script>
 {% endblock %}

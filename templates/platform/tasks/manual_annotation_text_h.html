@@ -19,19 +19,13 @@
 </style>
 {% endblock %} {% block task_table %}
 <div
-  class="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800 flex items-center justify-between gap-4"
+  class="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800"
 >
   <div>
     左侧列表按不确定性优先排序。当前共有
     <span id="manual-unlabeled-count">{{ unlabeled_count|default:0 }}</span>
     条待人工标注样本。保存后会将样本记为人工标注，并在后续重新调用半监督算法时纳入训练。
   </div>
-  <button
-    id="rerun-btn"
-    class="whitespace-nowrap rounded-md bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700 transition-colors"
-  >
-    重新调用半监督算法
-  </button>
 </div>
 
 <div
@@ -421,21 +415,6 @@
     }
   }
 
-  async function rerunSemiSupervised() {
-    const response = await fetch(`/tasks/${taskId}/manual_annotation/rerun/`, {
-      method: "POST",
-      headers: { "X-CSRFToken": getCookie("csrftoken") },
-    });
-
-    const data = await response.json();
-    if (!response.ok || data.status !== "success") {
-      throw new Error(data.message || "重新调用失败");
-    }
-
-    showToast(data.message || "已重新调用半监督算法", "success");
-    setTimeout(() => window.location.reload(), 1200);
-  }
-
   async function initPage() {
     try {
       candidateItems = await fetchAllCandidates();
@@ -471,14 +450,6 @@
   document
     .getElementById("uncertainty-sort-select")
     .addEventListener("change", async () => initPage());
-  document.getElementById("rerun-btn").addEventListener("click", async () => {
-    try {
-      await rerunSemiSupervised();
-    } catch (error) {
-      console.error(error);
-      showToast(error.message, "error");
-    }
-  });
   document
     .getElementById("manual-label-input")
     .addEventListener("keydown", async (event) => {

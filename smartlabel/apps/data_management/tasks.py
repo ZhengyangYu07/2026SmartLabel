@@ -618,6 +618,15 @@ def process_annotation_task(self, task_id):
             _update_task_progress(task, 10, self)
 
             # 3. 创建配置文件和执行命令
+            # 根据前端选择的 model_strength 生成 adapter 配置
+            strength_raw = (task.model_strength or "").strip().lower()
+            if strength_raw == "high":
+                adapter_cfg = {"enabled": True, "num_layers": 2, "hidden_dim": 1024, "activation": "gelu"}
+            elif strength_raw == "medium":
+                adapter_cfg = {"enabled": True, "num_layers": 1, "hidden_dim": 512, "activation": "relu"}
+            else:
+                adapter_cfg = {"enabled": False}
+
             config = {
                 "label_csv": str(label_file_path),  # 确保使用具体CSV文件路径
                 "dataset_format": "csv",
@@ -626,6 +635,7 @@ def process_annotation_task(self, task_id):
                 "output_path": str(result_dir),  # 统一使用 Path 和 str()
                 "batch_size": 64,
                 "device": "cuda",
+                # CG3 / diffmap / manifold 超参
                 "cg3_k": 30,
                 "cg3_lr": 5e-4,
                 "cg3_epochs": 2000,
@@ -643,11 +653,11 @@ def process_annotation_task(self, task_id):
                 "manifold_lr": 0.003,
                 "manifold_epochs": 60,
                 "manifold_num_layers": 3,
-                "manifold_hidden_dims": [
-                    512,
-                    256,
-                    128
-                ]
+                "manifold_hidden_dims": [512, 256, 128],
+                # 将 adapter 配置传递给 ImageCLIPEncoder
+                "adapter": adapter_cfg,
+                # 默认为 ViT-B/32，可通过前端或策略改为其他变体
+                "clip_model": "ViT-B/32",
             }
             with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, ensure_ascii=False, indent=4)

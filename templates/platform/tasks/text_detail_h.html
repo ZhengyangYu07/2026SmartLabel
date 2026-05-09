@@ -164,12 +164,18 @@
 >
   <div class="bg-white rounded-lg shadow-lg p-6 max-w-md w-full">
     <h3 class="text-lg font-bold text-gray-900 mb-4">修改标签</h3>
-    <input
-      id="edit-label-input"
-      type="text"
-      class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-400 mb-4"
-      placeholder="请输入新标签"
-    />
+    <div class="relative mb-4">
+      <input
+        id="edit-label-input"
+        type="text"
+        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
+        placeholder="请输入新标签"
+      />
+      <ul
+        id="modal-label-suggestions"
+        class="absolute top-full left-0 right-0 bg-white border border-gray-300 border-t-0 rounded-b-lg hidden max-h-48 overflow-y-auto z-50"
+      ></ul>
+    </div>
     <div class="flex gap-3">
       <button
         id="modal-cancel-btn"
@@ -196,6 +202,69 @@
   let currentItem = null;
   let currentPage = 1;
   let totalPages = 1;
+  let allLabels = new Set(); // 存储所有可能的标签
+
+  // 从后端获取所有标签
+  async function fetchAllLabels() {
+    try {
+      const response = await fetch(`/api/tasks/${taskId}/meta_data/`);
+      if (!response.ok) {
+        console.error("获取标签失败:", response.status);
+        return;
+      }
+      const data = await response.json();
+      if (data.status === "success" && data.labels) {
+        allLabels.clear();
+        data.labels.forEach((label) => allLabels.add(label));
+      }
+    } catch (error) {
+      console.error("获取标签时出错:", error);
+    }
+  }
+
+  // 过滤标签函数
+  function filterLabels(searchText) {
+    if (!searchText.trim()) {
+      return Array.from(allLabels).slice(0, 10); // 默认显示前10个
+    }
+    const lowerSearch = searchText.toLowerCase();
+    return Array.from(allLabels)
+      .filter((label) => label.toLowerCase().includes(lowerSearch))
+      .slice(0, 10); // 最多显示10个
+  }
+
+  // 显示模态框标签建议列表
+  function showModalLabelSuggestions(searchText) {
+    const suggestions = document.getElementById("modal-label-suggestions");
+    const filtered = filterLabels(searchText);
+
+    suggestions.innerHTML = "";
+
+    if (filtered.length === 0) {
+      suggestions.classList.add("hidden");
+      return;
+    }
+
+    filtered.forEach((label) => {
+      const li = document.createElement("li");
+      li.className =
+        "px-4 py-2 cursor-pointer hover:bg-blue-100 text-gray-700";
+      li.textContent = label;
+      li.onclick = () => {
+        document.getElementById("edit-label-input").value = label;
+        suggestions.classList.add("hidden");
+      };
+      suggestions.appendChild(li);
+    });
+
+    suggestions.classList.remove("hidden");
+  }
+
+  // 隐藏模态框标签建议列表
+  function hideModalLabelSuggestions() {
+    const suggestions = document.getElementById("modal-label-suggestions");
+    suggestions.classList.add("hidden");
+  }
 
   function normalizeConfidence(value) {
     const parsed = Number.parseFloat(value || 0);
@@ -314,6 +383,19 @@
     }
     document.getElementById("edit-label-input").value = currentItem.label || "";
     document.getElementById("edit-modal").classList.remove("hidden");
+
+    // 为编辑框添加事件监听
+    const editInput = document.getElementById("edit-label-input");
+    editInput.addEventListener("input", (e) => {
+      showModalLabelSuggestions(e.target.value);
+    });
+    editInput.addEventListener("focus", (e) => {
+      showModalLabelSuggestions(e.target.value);
+    });
+    editInput.addEventListener("blur", () => {
+      setTimeout(hideModalLabelSuggestions, 200);
+    });
+    editInput.focus();
   }
 
   // 打开详情区内联标签编辑
@@ -516,6 +598,7 @@
     .addEventListener("click", saveLabel);
 
   document.addEventListener("DOMContentLoaded", () => {
+    fetchAllLabels();
     loadPage(1);
   });
 </script>

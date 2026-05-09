@@ -53,6 +53,76 @@
   window.currentPage = 1;
   window.totalPages = 1;
   let activeStatus = "all";
+  let allLabels = new Set(); // 存储所有可能的标签
+
+  // 从后端获取所有标签
+  async function fetchAllLabels() {
+    try {
+      const response = await fetch(`/api/tasks/${taskId}/meta_data/`);
+      if (!response.ok) {
+        console.error("获取标签失败:", response.status);
+        return;
+      }
+      const data = await response.json();
+      if (data.status === "success" && data.labels) {
+        allLabels.clear();
+        data.labels.forEach((label) => allLabels.add(label));
+      }
+    } catch (error) {
+      console.error("获取标签时出错:", error);
+    }
+  }
+
+  // 过滤标签函数
+  function filterLabels(searchText) {
+    if (!searchText.trim()) {
+      return Array.from(allLabels).slice(0, 10); // 默认显示前10个
+    }
+    const lowerSearch = searchText.toLowerCase();
+    return Array.from(allLabels)
+      .filter((label) => label.toLowerCase().includes(lowerSearch))
+      .slice(0, 10); // 最多显示10个
+  }
+
+  // 显示表格行标签建议列表
+  function showTableLabelSuggestions(suggestionsId, searchText) {
+    const suggestions = document.getElementById(suggestionsId);
+    if (!suggestions) return;
+    const filtered = filterLabels(searchText);
+
+    suggestions.innerHTML = "";
+
+    if (filtered.length === 0) {
+      suggestions.classList.add("hidden");
+      return;
+    }
+
+    filtered.forEach((label) => {
+      const li = document.createElement("li");
+      li.className =
+        "px-4 py-2 cursor-pointer hover:bg-indigo-100 text-gray-700";
+      li.textContent = label;
+      li.onclick = () => {
+        const inputId = suggestionsId.replace("-suggestions", "-input");
+        const inputElement = document.getElementById(inputId);
+        if (inputElement) {
+          inputElement.value = label;
+        }
+        suggestions.classList.add("hidden");
+      };
+      suggestions.appendChild(li);
+    });
+
+    suggestions.classList.remove("hidden");
+  }
+
+  // 隐藏表格行标签建议列表
+  function hideTableLabelSuggestions(suggestionsId) {
+    const suggestions = document.getElementById(suggestionsId);
+    if (suggestions) {
+      suggestions.classList.add("hidden");
+    }
+  }
 
   function statusBadge(status) {
     if (status === "已校验") {
@@ -230,8 +300,9 @@
                   : '<span class="text-gray-400">无图片</span>'
               }
             </td>
-            <td class="px-4 py-3">
-              <input type="text" value="${safeLabel}" class="label-input w-full border border-gray-300 rounded px-2 py-1" data-id="${item.id}" />
+            <td class="px-4 py-3 relative">
+              <input type="text" value="${safeLabel}" id="label-input-${item.id}" class="label-input w-full border border-gray-300 rounded px-2 py-1" data-id="${item.id}" />
+              <ul id="label-suggestions-${item.id}" class="absolute top-full left-0 right-0 bg-white border border-gray-300 border-t-0 rounded-b-lg hidden max-h-48 overflow-y-auto z-50"></ul>
             </td>
             <td class="px-4 py-3">${statusBadge(item.status)}</td>
             <td class="px-4 py-3">${action}</td>
@@ -241,6 +312,21 @@
         .join("");
 
       document.querySelectorAll(".label-input").forEach((input) => {
+        const suggestionsId = `label-suggestions-${input.dataset.id}`;
+
+        // 添加事件监听器
+        input.addEventListener("input", () => {
+          showTableLabelSuggestions(suggestionsId, input.value);
+        });
+
+        input.addEventListener("focus", () => {
+          showTableLabelSuggestions(suggestionsId, input.value);
+        });
+
+        input.addEventListener("blur", () => {
+          setTimeout(() => hideTableLabelSuggestions(suggestionsId), 200);
+        });
+
         input.addEventListener("keydown", async (event) => {
           if (event.key !== "Enter") return;
           const id = input.dataset.id;
