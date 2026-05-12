@@ -146,12 +146,18 @@
           <label class="block text-sm font-medium text-gray-700 mb-2"
             >人工标签</label
           >
-          <input
-            id="manual-label-input"
-            type="text"
-            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
-            placeholder="请输入正确标签"
-          />
+          <div class="relative">
+            <input
+              id="manual-label-input"
+              type="text"
+              class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+              placeholder="请输入正确标签"
+            />
+            <ul
+              id="label-suggestions"
+              class="absolute top-full left-0 right-0 bg-white border border-gray-300 border-t-0 rounded-b-lg hidden max-h-48 overflow-y-auto z-50"
+            ></ul>
+          </div>
         </div>
 
         <div class="grid grid-cols-1 gap-3 mt-auto">
@@ -177,6 +183,9 @@
   const taskId = "{{ task.id }}";
   let candidateItems = [];
   let currentCandidateIndex = -1;
+  let allLabels = new Set(); // 存储所有可能的标签
+  let labelsLoadPromise = Promise.resolve();
+  let labelsReady = false;
 
   function getCookie(name) {
     let cookieValue = null;
@@ -191,6 +200,137 @@
       }
     }
     return cookieValue;
+  }
+
+  // 从候选列表中收集所有标签
+  function collectLabelsFromCandidates() {
+    const labels = new Set();
+    candidateItems.forEach((item) => {
+      const label = item.label || item.predicted_label;
+      if (label) {
+        labels.add(label);
+      }
+    });
+    return labels;
+  }
+
+  // 从后端获取所有标签
+  async function fetchAllLabels() {
+    try {
+      const response = await fetch(`/api/tasks/${taskId}/meta_data/`);
+      if (!response.ok) {
+        console.error("获取标签失败:", response.status);
+        return;
+      }
+      const data = await response.json();
+      if (data.status === "success" && data.labels && data.labels.length > 0) {
+        allLabels.clear();
+        data.labels.forEach((label) => allLabels.add(label));
+        console.log("从API获取到标签:", Array.from(allLabels));
+      } else {
+        console.warn("API未返回标签数据，将从候选项中动态收集");
+        const candidateLabels = collectLabelsFromCandidates();
+        if (candidateLabels.size > 0) {
+          allLabels.clear();
+          candidateLabels.forEach((label) => allLabels.add(label));
+        }
+      }
+    } catch (error) {
+      console.error("获取标签时出错:", error);
+    } finally {
+      labelsReady = true;
+
+      const activeInput = document.activeElement;
+      if (activeInput && activeInput.id === "manual-label-input") {
+        showCurrentLabelSuggestions();
+      }
+    }
+  }
+
+  // 过滤标签函数
+  function filterLabels(searchText) {
+    // 如果allLabels为空，从候选列表中动态收集
+    if (allLabels.size === 0) {
+      const candidateLabels = collectLabelsFromCandidates();
+      if (candidateLabels.size > 0) {
+        allLabels.clear();
+        candidateLabels.forEach((label) => allLabels.add(label));
+      }
+    }
+
+    if (!searchText.trim()) {
+      return Array.from(allLabels).slice(0, 10); // 默认显示前10个
+    }
+    const lowerSearch = searchText.toLowerCase();
+    return Array.from(allLabels)
+      .filter((label) => label.toLowerCase().includes(lowerSearch))
+      .slice(0, 10); // 最多显示10个
+  }
+
+  // 显示标签建议列表
+  function showLabelSuggestions(searchText, onSelect) {
+    const suggestions = document.getElementById("label-suggestions");
+    if (!suggestions) return;
+
+    if (!labelsReady) {
+      suggestions.innerHTML = `
+        <li class="px-4 py-2 text-gray-400 cursor-default">标签加载中...</li>
+      `;
+      suggestions.classList.remove("hidden");
+      return;
+    }
+
+    const filtered = filterLabels(searchText);
+
+    suggestions.innerHTML = "";
+
+    if (filtered.length === 0) {
+      suggestions.classList.add("hidden");
+      return;
+    }
+
+    filtered.forEach((label) => {
+      const li = document.createElement("li");
+      li.className =
+        "px-4 py-2 cursor-pointer hover:bg-indigo-100 text-gray-700";
+      li.textContent = label;
+      li.onmousedown = async (event) => {
+        event.preventDefault();
+        document.getElementById("manual-label-input").value = label;
+        suggestions.classList.add("hidden");
+
+        if (typeof onSelect === "function") {
+          await onSelect(label);
+        }
+      };
+      suggestions.appendChild(li);
+    });
+
+    suggestions.classList.remove("hidden");
+  }
+
+  // 隐藏标签建议列表
+  function hideLabelSuggestions() {
+    const suggestions = document.getElementById("label-suggestions");
+    suggestions.classList.add("hidden");
+  }
+
+  async function handleLabelSuggestionSelect() {
+    try {
+      await saveManualLabel();
+    } catch (error) {
+      console.error(error);
+      showToast(error.message, "error");
+    }
+  }
+
+  function showCurrentLabelSuggestions() {
+    const labelInput = document.getElementById("manual-label-input");
+    if (!labelInput) {
+      return;
+    }
+
+    showLabelSuggestions("", handleLabelSuggestionSelect);
   }
 
   function showToast(message, type = "info") {
@@ -409,18 +549,27 @@
 
     showToast(data.message || "人工标注已保存", "success");
     // 重新加载候选列表以保证计数与后端一致
-    await initPage();
+    await initPage(true);
     if (window.refreshTaskStatistics) {
       await window.refreshTaskStatistics(taskId);
     }
   }
 
-  async function initPage() {
+  async function initPage(autoFocusNext = false) {
     try {
       candidateItems = await fetchAllCandidates();
       renderCandidateList();
       if (candidateItems.length > 0) {
         selectCandidate(0);
+        if (autoFocusNext) {
+          requestAnimationFrame(() => {
+            const labelInput = document.getElementById("manual-label-input");
+            if (labelInput) {
+              labelInput.focus();
+              showCurrentLabelSuggestions();
+            }
+          });
+        }
       } else {
         resetPreview();
       }
@@ -464,6 +613,28 @@
       }
     });
 
-  document.addEventListener("DOMContentLoaded", initPage);
+  // 标签输入框事件监听
+  document
+    .getElementById("manual-label-input")
+    .addEventListener("input", (event) => {
+      showLabelSuggestions(event.target.value);
+    });
+
+  document
+    .getElementById("manual-label-input")
+    .addEventListener("focus", () => {
+      showCurrentLabelSuggestions();
+    });
+
+  document.getElementById("manual-label-input").addEventListener("blur", () => {
+    // 延迟隐藏，以便用户点击列表项
+    setTimeout(hideLabelSuggestions, 200);
+  });
+
+  document.addEventListener("DOMContentLoaded", async () => {
+    labelsLoadPromise = fetchAllLabels();
+    await labelsLoadPromise;
+    await initPage();
+  });
 </script>
 {% endblock %}

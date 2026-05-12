@@ -114,17 +114,30 @@ STATUS_MAP_DB_TO_FRONTEND = {
 
 
 def _get_label_verification_stats(task, result_model, relation_field):
-    """统计已标注样本中的校验状态数据。"""
-    labeled_queryset = result_model.objects.filter(
-        **{relation_field: task},
-        confidence=-1
-    )
+    """统计任务整体的校验状态数据，并保留人工标注数量。"""
+    task_queryset = result_model.objects.filter(**{relation_field: task})
+    manual_queryset = task_queryset.filter(confidence=-1)
 
-    return labeled_queryset.aggregate(
-        total_labeled_count=Count('id'),
-        verified_count=Count('id', filter=Q(status='verified')),
-        unverified_count=Count('id', filter=Q(status='unverified')),
-    )
+    verified_count = task_queryset.filter(status='verified').count()
+    total_count = task_queryset.count()
+    manual_annotated_count = manual_queryset.count()
+    
+    # 未校验 = confidence=-1 的数据数量 - 已校验
+    unverified_count = manual_annotated_count - verified_count
+
+    verification_progress = 0
+    if total_count > 0:
+        verification_progress = round((verified_count / total_count) * 100, 1)
+
+    return {
+        'manual_annotated_count': manual_annotated_count,
+        'total_labeled_count': manual_annotated_count,
+        'verified_count': verified_count,
+        'unverified_count': unverified_count,
+        'total_count': total_count,
+        'total_verifiable_count': total_count,
+        'verification_progress': verification_progress,
+    }
 
 
 def _check_compressed_file_contents(file_list, task_type):
@@ -1013,12 +1026,13 @@ def task_detail(request, task_id):
     config = TASK_CONFIG[task.task_type]
     result_model = config['result_model']
     relation_field = config['relation_field']
+    total_count = result_model.objects.filter(**{relation_field: task}).count()
 
     stats = _get_label_verification_stats(task, result_model, relation_field)
 
     # 计算校验进度
     verification_progress = 0
-    total_verifiable = stats.get('total_labeled_count', 0)
+    total_verifiable = stats.get('total_verifiable_count', total_count)
     verified = stats.get('verified_count', 0)
     if total_verifiable > 0:
         verification_progress = round((verified / total_verifiable) * 100, 1)
@@ -1027,9 +1041,9 @@ def task_detail(request, task_id):
     task.total_verifiable_count = total_verifiable
     task.verified_count = verified
     task.unverified_count = stats.get('unverified_count', 0)
-    task.manual_annotated_count = total_verifiable # 新增：人工标注数量（即已标注总数）
+    task.manual_annotated_count = stats.get('manual_annotated_count', stats.get('total_labeled_count', 0)) # 新增：人工标注数量（即已标注总数）
     task.verification_progress = verification_progress # 新增：校验进度
-    task.total_count = result_model.objects.filter(**{relation_field: task}).count()
+    task.total_count = total_count
 
     # 回退逻辑：如果数据库中尚无样本（例如刚提交），尝试根据解压目录估算总数，便于页面初次渲染显示正确的上传数量
     if task.total_count == 0 and getattr(task, 'extracted_dir', None):
@@ -1697,14 +1711,11 @@ def get_task_stats(request, task_id):
             # 出错时保留原始 total_count（0）
             total_count = result_model.objects.filter(**{relation_field: task}).count()
 
-    total_verifiable = stats.get('total_labeled_count', 0)
+    total_verifiable = stats.get('total_verifiable_count', total_count)
     verified = stats.get('verified_count', 0)
     unverified = stats.get('unverified_count', 0)
-
-    # 计算校验进度
-    verification_progress = 0
-    if total_verifiable > 0:
-        verification_progress = round((verified / total_verifiable) * 100, 1)
+    manual_annotated_count = stats.get('manual_annotated_count', stats.get('total_labeled_count', 0))
+    verification_progress = stats.get('verification_progress', 0)
 
     # 返回JSON格式的统计数据
     return JsonResponse({
@@ -1712,7 +1723,7 @@ def get_task_stats(request, task_id):
         'stats': {
             'verified_count': verified,
             'unverified_count': unverified,
-            'manual_annotated_count': total_verifiable,
+            'manual_annotated_count': manual_annotated_count,
             'total_count': total_count,
             'total_verifiable_count': total_verifiable,
             'verification_progress': verification_progress

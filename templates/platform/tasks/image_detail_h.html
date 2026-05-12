@@ -1,4 +1,10 @@
 {% extends "platform/components/base_task_h.html" %} {% load static %} {% block task_table %}
+<style>
+  #labeled-panel td.label-cell {
+    overflow: visible !important;
+    white-space: normal !important;
+  }
+</style>
 <div
   id="labeled-panel"
   class="bg-white rounded-xl shadow-md border border-gray-100 p-5 space-y-4"
@@ -54,6 +60,20 @@
   window.totalPages = 1;
   let activeStatus = "all";
   let allLabels = new Set(); // 存储所有可能的标签
+  let labelsLoadPromise = Promise.resolve();
+  let labelsReady = false;
+
+  // 从表格中收集所有标签
+  function collectLabelsFromTable() {
+    const labels = new Set();
+    document.querySelectorAll(".label-input").forEach((input) => {
+      const label = input.value.trim();
+      if (label) {
+        labels.add(label);
+      }
+    });
+    return labels;
+  }
 
   // 从后端获取所有标签
   async function fetchAllLabels() {
@@ -64,30 +84,100 @@
         return;
       }
       const data = await response.json();
-      if (data.status === "success" && data.labels) {
+      if (data.status === "success" && data.labels && data.labels.length > 0) {
         allLabels.clear();
         data.labels.forEach((label) => allLabels.add(label));
+        console.log("从API获取到标签:", Array.from(allLabels));
+      } else {
+        console.warn("API未返回标签数据，将从任务数据中动态收集");
+        const labelsFromTaskData = await collectLabelsFromTaskData();
+        if (labelsFromTaskData.size > 0) {
+          allLabels.clear();
+          labelsFromTaskData.forEach((label) => allLabels.add(label));
+        }
       }
     } catch (error) {
       console.error("获取标签时出错:", error);
+    } finally {
+      labelsReady = true;
+
+      const activeInput = document.activeElement;
+      if (activeInput && activeInput.classList.contains("label-input")) {
+        const suggestionsId = `label-suggestions-${activeInput.dataset.id}`;
+        showTableLabelSuggestions(suggestionsId, activeInput.value);
+      }
     }
+  }
+
+  async function collectLabelsFromTaskData() {
+    const labels = new Set();
+    let page = 1;
+    let totalPages = 1;
+
+    try {
+      while (page <= totalPages) {
+        const params = new URLSearchParams({
+          page: String(page),
+          page_size: "200",
+          labeled_only: "1",
+        });
+        const response = await fetch(
+          `/tasks/${taskId}/data/?${params.toString()}`,
+        );
+        if (!response.ok) break;
+
+        const data = await response.json();
+        totalPages = data.total_pages || 1;
+
+        (data.results || []).forEach((item) => {
+          const label = (item.label || item.predicted_label || "").trim();
+          if (label && label !== "-") {
+            labels.add(label);
+          }
+        });
+
+        page += 1;
+      }
+    } catch (error) {
+      console.warn("分页收集标签失败:", error);
+    }
+
+    return labels;
   }
 
   // 过滤标签函数
   function filterLabels(searchText) {
+    // 如果allLabels为空，从表格中动态收集
+    if (allLabels.size === 0) {
+      const tableLabels = collectLabelsFromTable();
+      if (tableLabels.size > 0) {
+        allLabels.clear();
+        tableLabels.forEach((label) => allLabels.add(label));
+      }
+    }
+
     if (!searchText.trim()) {
-      return Array.from(allLabels).slice(0, 10); // 默认显示前10个
+      return Array.from(allLabels);
     }
     const lowerSearch = searchText.toLowerCase();
-    return Array.from(allLabels)
-      .filter((label) => label.toLowerCase().includes(lowerSearch))
-      .slice(0, 10); // 最多显示10个
+    return Array.from(allLabels).filter((label) =>
+      label.toLowerCase().includes(lowerSearch),
+    );
   }
 
   // 显示表格行标签建议列表
-  function showTableLabelSuggestions(suggestionsId, searchText) {
+  function showTableLabelSuggestions(suggestionsId, searchText, onSelect) {
     const suggestions = document.getElementById(suggestionsId);
     if (!suggestions) return;
+
+    if (!labelsReady) {
+      suggestions.innerHTML = `
+        <li class="px-4 py-2 text-gray-400 cursor-default">标签加载中...</li>
+      `;
+      suggestions.classList.remove("hidden");
+      return;
+    }
+
     const filtered = filterLabels(searchText);
 
     suggestions.innerHTML = "";
@@ -102,13 +192,18 @@
       li.className =
         "px-4 py-2 cursor-pointer hover:bg-indigo-100 text-gray-700";
       li.textContent = label;
-      li.onclick = () => {
+      li.onclick = async () => {
         const inputId = suggestionsId.replace("-suggestions", "-input");
         const inputElement = document.getElementById(inputId);
+        const previousLabel = inputElement ? inputElement.value.trim() : "";
         if (inputElement) {
           inputElement.value = label;
         }
         suggestions.classList.add("hidden");
+
+        if (typeof onSelect === "function") {
+          await onSelect(label, previousLabel);
+        }
       };
       suggestions.appendChild(li);
     });
@@ -181,7 +276,10 @@
       body,
     });
     const data = await resp.json();
-    if (!resp.ok || data.status !== "success") {
+    if (
+      !resp.ok ||
+      (data.status !== "success" && data.status !== "no_change")
+    ) {
       throw new Error(data.message || "标签更新失败");
     }
   }
@@ -200,7 +298,10 @@
       body,
     });
     const data = await resp.json();
-    if (!resp.ok || data.status !== "success") {
+    if (
+      !resp.ok ||
+      (data.status !== "success" && data.status !== "no_change")
+    ) {
       throw new Error(data.message || "通过操作失败");
     }
   }
@@ -300,7 +401,7 @@
                   : '<span class="text-gray-400">无图片</span>'
               }
             </td>
-            <td class="px-4 py-3 relative">
+            <td class="px-4 py-3 relative label-cell">
               <input type="text" value="${safeLabel}" id="label-input-${item.id}" class="label-input w-full border border-gray-300 rounded px-2 py-1" data-id="${item.id}" />
               <ul id="label-suggestions-${item.id}" class="absolute top-full left-0 right-0 bg-white border border-gray-300 border-t-0 rounded-b-lg hidden max-h-48 overflow-y-auto z-50"></ul>
             </td>
@@ -313,14 +414,39 @@
 
       document.querySelectorAll(".label-input").forEach((input) => {
         const suggestionsId = `label-suggestions-${input.dataset.id}`;
+        const handleSuggestionSelect = async (selectedLabel, previousLabel) => {
+          const id = input.dataset.id;
+          const nextLabel = selectedLabel.trim();
+
+          if (!nextLabel) {
+            window.showMessage("标签不能为空", "warning");
+            return;
+          }
+
+          try {
+            if (nextLabel !== previousLabel) {
+              await updateLabel(id, nextLabel);
+            }
+            await verifyItem(id);
+            window.showMessage("标签已自动通过", "success");
+            await loadPage(window.currentPage);
+            window.updateStats();
+          } catch (error) {
+            window.showMessage(error.message, "error");
+          }
+        };
 
         // 添加事件监听器
         input.addEventListener("input", () => {
-          showTableLabelSuggestions(suggestionsId, input.value);
+          showTableLabelSuggestions(
+            suggestionsId,
+            input.value,
+            handleSuggestionSelect,
+          );
         });
 
         input.addEventListener("focus", () => {
-          showTableLabelSuggestions(suggestionsId, input.value);
+          showTableLabelSuggestions(suggestionsId, "", handleSuggestionSelect);
         });
 
         input.addEventListener("blur", () => {
@@ -371,7 +497,9 @@
   window.loadPage = loadPage;
   window.goToPage = goToPage;
 
-  document.addEventListener("DOMContentLoaded", () => {
+  document.addEventListener("DOMContentLoaded", async () => {
+    labelsLoadPromise = fetchAllLabels();
+    await labelsLoadPromise;
     ensurePaginationControls();
     const statusFilter = document.getElementById("status-filter");
     statusFilter.addEventListener("change", async () => {

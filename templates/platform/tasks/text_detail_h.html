@@ -204,6 +204,18 @@
   let totalPages = 1;
   let allLabels = new Set(); // 存储所有可能的标签
 
+  // 从表格中收集所有标签
+  function collectLabelsFromTable() {
+    const labels = new Set();
+    allItems.forEach((item) => {
+      const label = (item.label || "").trim();
+      if (label && label !== "-") {
+        labels.add(label);
+      }
+    });
+    return labels;
+  }
+
   // 从后端获取所有标签
   async function fetchAllLabels() {
     try {
@@ -213,9 +225,12 @@
         return;
       }
       const data = await response.json();
-      if (data.status === "success" && data.labels) {
+      if (data.status === "success" && data.labels && data.labels.length > 0) {
         allLabels.clear();
         data.labels.forEach((label) => allLabels.add(label));
+        console.log("从API获取到标签:", Array.from(allLabels));
+      } else {
+        console.warn("API未返回标签数据，将从表格中动态收集");
       }
     } catch (error) {
       console.error("获取标签时出错:", error);
@@ -224,6 +239,15 @@
 
   // 过滤标签函数
   function filterLabels(searchText) {
+    // 如果allLabels为空，从表格中动态收集
+    if (allLabels.size === 0) {
+      const tableLabels = collectLabelsFromTable();
+      if (tableLabels.size > 0) {
+        allLabels.clear();
+        tableLabels.forEach((label) => allLabels.add(label));
+      }
+    }
+
     if (!searchText.trim()) {
       return Array.from(allLabels).slice(0, 10); // 默认显示前10个
     }
@@ -247,8 +271,7 @@
 
     filtered.forEach((label) => {
       const li = document.createElement("li");
-      li.className =
-        "px-4 py-2 cursor-pointer hover:bg-blue-100 text-gray-700";
+      li.className = "px-4 py-2 cursor-pointer hover:bg-blue-100 text-gray-700";
       li.textContent = label;
       li.onclick = () => {
         document.getElementById("edit-label-input").value = label;
@@ -258,6 +281,47 @@
     });
 
     suggestions.classList.remove("hidden");
+  }
+
+  function showInlineLabelSuggestions(suggestionsId, searchText, onSelect) {
+    const suggestions = document.getElementById(suggestionsId);
+    if (!suggestions) return;
+    const filtered = filterLabels(searchText);
+
+    suggestions.innerHTML = "";
+
+    if (filtered.length === 0) {
+      suggestions.classList.add("hidden");
+      return;
+    }
+
+    filtered.forEach((label) => {
+      const li = document.createElement("li");
+      li.className = "px-4 py-2 cursor-pointer hover:bg-blue-100 text-gray-700";
+      li.textContent = label;
+      li.onclick = async () => {
+        const inputId = suggestionsId.replace("-suggestions", "-input");
+        const inputElement = document.getElementById(inputId);
+        if (inputElement) {
+          inputElement.value = label;
+        }
+        suggestions.classList.add("hidden");
+
+        if (typeof onSelect === "function") {
+          await onSelect(label);
+        }
+      };
+      suggestions.appendChild(li);
+    });
+
+    suggestions.classList.remove("hidden");
+  }
+
+  function hideInlineLabelSuggestions(suggestionsId) {
+    const suggestions = document.getElementById(suggestionsId);
+    if (suggestions) {
+      suggestions.classList.add("hidden");
+    }
   }
 
   // 隐藏模态框标签建议列表
@@ -359,11 +423,14 @@
     );
     // 详情区显示可编辑的标签（内联编辑，点击进入编辑）
     document.getElementById("detail-prediction").innerHTML = `
-      <span id="label-display-${item.id}" class="font-semibold text-gray-900 cursor-pointer underline text-blue-600" onclick="openLabelEditor('${item.id}')">${item.label || "-"}</span>
-      <input id="label-input-${item.id}" type="text" class="hidden mt-2 w-full px-2 py-1 border rounded" />
-      <div id="label-actions-${item.id}" class="hidden mt-2">
-        <button id="save-label-${item.id}" class="px-3 py-1 bg-green-600 text-white rounded text-sm mr-2">保存</button>
-        <button id="cancel-label-${item.id}" class="px-3 py-1 bg-gray-200 text-gray-800 rounded text-sm">取消</button>
+      <div class="relative">
+        <span id="label-display-${item.id}" class="font-semibold text-gray-900 cursor-pointer underline text-blue-600" onclick="openLabelEditor('${item.id}')">${item.label || "-"}</span>
+        <input id="label-input-${item.id}" type="text" class="hidden mt-2 w-full px-2 py-1 border rounded" />
+        <ul id="label-suggestions-${item.id}" class="absolute top-full left-0 right-0 bg-white border border-gray-300 border-t-0 rounded-b-lg hidden max-h-48 overflow-y-auto z-50"></ul>
+        <div id="label-actions-${item.id}" class="hidden mt-2">
+          <button id="save-label-${item.id}" class="px-3 py-1 bg-green-600 text-white rounded text-sm mr-2">保存</button>
+          <button id="cancel-label-${item.id}" class="px-3 py-1 bg-gray-200 text-gray-800 rounded text-sm">取消</button>
+        </div>
       </div>
     `;
 
@@ -390,7 +457,7 @@
       showModalLabelSuggestions(e.target.value);
     });
     editInput.addEventListener("focus", (e) => {
-      showModalLabelSuggestions(e.target.value);
+      showModalLabelSuggestions("");
     });
     editInput.addEventListener("blur", () => {
       setTimeout(hideModalLabelSuggestions, 200);
@@ -410,7 +477,28 @@
     input.classList.remove("hidden");
     actions.classList.remove("hidden");
     input.value = item.label || "";
+
+    const suggestionsId = `label-suggestions-${itemId}`;
+    const handleSuggestionSelect = async (selectedLabel) => {
+      input.value = selectedLabel;
+      updateLabelAndVerify(itemId, selectedLabel, item);
+    };
+    input.oninput = (event) => {
+      showInlineLabelSuggestions(
+        suggestionsId,
+        event.target.value,
+        handleSuggestionSelect,
+      );
+    };
+    input.onfocus = (event) => {
+      showInlineLabelSuggestions(suggestionsId, "", handleSuggestionSelect);
+    };
+    input.onblur = () => {
+      setTimeout(() => hideInlineLabelSuggestions(suggestionsId), 200);
+    };
+
     input.focus();
+    showInlineLabelSuggestions(suggestionsId, "", handleSuggestionSelect);
 
     document.getElementById(`save-label-${itemId}`).onclick = () =>
       updateLabelAndVerify(itemId, input.value, item);
@@ -418,6 +506,7 @@
       disp.classList.remove("hidden");
       input.classList.add("hidden");
       actions.classList.add("hidden");
+      hideInlineLabelSuggestions(suggestionsId);
     };
   }
 
@@ -425,15 +514,35 @@
   function updateLabelAndVerify(itemId, newLabel, itemObj) {
     const originalLabel = itemObj.label || "";
     if (newLabel === originalLabel) {
-      window.showMessage("标签未修改", "warning");
-      const disp = document.getElementById(`label-display-${itemId}`);
-      const input = document.getElementById(`label-input-${itemId}`);
-      const actions = document.getElementById(`label-actions-${itemId}`);
-      if (disp && input && actions) {
-        disp.classList.remove("hidden");
-        input.classList.add("hidden");
-        actions.classList.add("hidden");
-      }
+      window.showGlobalLoading();
+      fetch(`/tasks/${taskId}/verify/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-CSRFToken": getCookie("csrftoken"),
+        },
+        body: `item_id=${itemId}&target_status=已校验`,
+      })
+        .then((r) => r.json())
+        .then((vk) => {
+          const disp = document.getElementById(`label-display-${itemId}`);
+          const input = document.getElementById(`label-input-${itemId}`);
+          const actions = document.getElementById(`label-actions-${itemId}`);
+          if (disp && input && actions) {
+            disp.classList.remove("hidden");
+            input.classList.add("hidden");
+            actions.classList.add("hidden");
+          }
+
+          if (vk.status === "success" || vk.status === "no_change") {
+            window.showMessage("已自动标记为已校验", "success");
+            loadPage(currentPage);
+          } else {
+            window.showMessage(vk.message || "标记已校验失败", "warning");
+          }
+        })
+        .catch((err) => window.showMessage(`请求失败: ${err.message}`, "error"))
+        .finally(() => window.hideGlobalLoading());
       return;
     }
     window.showGlobalLoading();
@@ -459,6 +568,7 @@
             input.classList.add("hidden");
             actions.classList.add("hidden");
           }
+          allLabels.add(newLabel);
           document.getElementById("detail-prediction").textContent = newLabel;
           // 成功后自动标为已校验
           return fetch(`/tasks/${taskId}/verify/`, {

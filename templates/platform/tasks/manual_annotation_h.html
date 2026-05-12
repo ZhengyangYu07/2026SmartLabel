@@ -6,15 +6,6 @@
   }
 </style>
 {% endblock %} {% block task_table %}
-<div
-  class="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800"
->
-  <div>
-    左侧列表按不确定性优先排序。当前共有
-    <span id="manual-unlabeled-count">{{ unlabeled_count|default:0 }}</span>
-    条未标注样本。标注完成后点击“保存并下一张”，系统会把该样本记为人工标注，并在后续重新调用半监督算法时纳入训练。
-  </div>
-</div>
 
 <div
   class="grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] gap-4 min-h-[760px]"
@@ -175,6 +166,18 @@
     return Number.parseFloat(value || 0).toFixed(3);
   }
 
+  // 从候选列表中收集所有标签
+  function collectLabelsFromCandidates() {
+    const labels = new Set();
+    candidateItems.forEach((item) => {
+      const label = item.label || item.predicted_label;
+      if (label) {
+        labels.add(label);
+      }
+    });
+    return labels;
+  }
+
   // 从后端获取所有标签
   async function fetchAllLabels() {
     try {
@@ -184,9 +187,12 @@
         return;
       }
       const data = await response.json();
-      if (data.status === "success" && data.labels) {
+      if (data.status === "success" && data.labels && data.labels.length > 0) {
         allLabels.clear();
         data.labels.forEach((label) => allLabels.add(label));
+        console.log("从API获取到标签:", Array.from(allLabels));
+      } else {
+        console.warn("API未返回标签数据，将从候选项中动态收集");
       }
     } catch (error) {
       console.error("获取标签时出错:", error);
@@ -195,6 +201,15 @@
 
   // 过滤标签函数
   function filterLabels(searchText) {
+    // 如果allLabels为空，从候选列表中动态收集
+    if (allLabels.size === 0) {
+      const candidateLabels = collectLabelsFromCandidates();
+      if (candidateLabels.size > 0) {
+        allLabels.clear();
+        candidateLabels.forEach((label) => allLabels.add(label));
+      }
+    }
+
     if (!searchText.trim()) {
       return Array.from(allLabels).slice(0, 10); // 默认显示前10个
     }
@@ -205,7 +220,7 @@
   }
 
   // 显示标签建议列表
-  function showLabelSuggestions(searchText) {
+  function showLabelSuggestions(searchText, onSelect) {
     const suggestions = document.getElementById("label-suggestions");
     const filtered = filterLabels(searchText);
 
@@ -221,9 +236,14 @@
       li.className =
         "px-4 py-2 cursor-pointer hover:bg-indigo-100 text-gray-700";
       li.textContent = label;
-      li.onclick = () => {
+      li.onmousedown = async (event) => {
+        event.preventDefault();
         document.getElementById("manual-label-input").value = label;
         suggestions.classList.add("hidden");
+
+        if (typeof onSelect === "function") {
+          await onSelect(label);
+        }
       };
       suggestions.appendChild(li);
     });
@@ -327,7 +347,7 @@
     previewEmpty.classList.remove("hidden");
   }
 
-  function selectCandidate(index) {
+  function selectCandidate(index, autoFocusLabelInput = false) {
     if (index < 0 || index >= candidateItems.length) {
       currentCandidateIndex = -1;
       resetPreview();
@@ -383,7 +403,7 @@
       currentCandidateIndex,
       candidateItems.length - 1,
     );
-    selectCandidate(nextIndex);
+    selectCandidate(nextIndex, true);
   }
 
   async function saveManualLabel() {
@@ -415,10 +435,8 @@
     }
 
     showToast(data.message || "人工标注已保存", "success");
-    // 先移除当前候选项，再重新初始化页面以保证与后端保持一致
-    removeCurrentCandidate();
     try {
-      await initPage();
+      await initPage(true);
     } catch (e) {
       console.warn("重新加载候选列表失败", e);
     }
@@ -431,12 +449,39 @@
     }
   }
 
-  async function initPage() {
+  async function handleLabelSuggestionSelect() {
+    try {
+      await saveManualLabel();
+    } catch (error) {
+      console.error(error);
+      showToast(error.message, "error");
+    }
+  }
+
+  function showCurrentLabelSuggestions() {
+    const labelInput = document.getElementById("manual-label-input");
+    if (!labelInput) {
+      return;
+    }
+
+    showLabelSuggestions("", handleLabelSuggestionSelect);
+  }
+
+  async function initPage(autoFocusNext = false) {
     try {
       candidateItems = await fetchAllCandidates();
       renderCandidateList();
       if (candidateItems.length > 0) {
-        selectCandidate(0);
+        selectCandidate(0, false);
+        if (autoFocusNext) {
+          requestAnimationFrame(() => {
+            const labelInput = document.getElementById("manual-label-input");
+            if (labelInput) {
+              labelInput.focus();
+              showLabelSuggestions("", handleLabelSuggestionSelect);
+            }
+          });
+        }
       } else {
         resetPreview();
       }
@@ -487,16 +532,14 @@
 
   document
     .getElementById("manual-label-input")
-    .addEventListener("focus", (event) => {
-      showLabelSuggestions(event.target.value);
+    .addEventListener("focus", () => {
+      showLabelSuggestions("", handleLabelSuggestionSelect);
     });
 
-  document
-    .getElementById("manual-label-input")
-    .addEventListener("blur", () => {
-      // 延迟隐藏，以便用户点击列表项
-      setTimeout(hideLabelSuggestions, 200);
-    });
+  document.getElementById("manual-label-input").addEventListener("blur", () => {
+    // 延迟隐藏，以便用户点击列表项
+    setTimeout(hideLabelSuggestions, 200);
+  });
 
   document.addEventListener("DOMContentLoaded", async () => {
     await fetchAllLabels();
