@@ -32,7 +32,7 @@
           <th class="px-4 py-3">图片</th>
           <th class="px-4 py-3">标签</th>
           <th class="px-4 py-3">状态</th>
-          <th class="px-4 py-3">操作</th>
+          <th class="px-4 py-3">是否确认该标注正确</th>
         </tr>
       </thead>
       <tbody id="labeled-table-body" class="divide-y divide-gray-100"></tbody>
@@ -163,6 +163,24 @@
     return Array.from(allLabels).filter((label) =>
       label.toLowerCase().includes(lowerSearch),
     );
+  }
+
+  function registerLabelSuggestion(label) {
+    const normalizedLabel = (label || "").trim();
+    if (!normalizedLabel || normalizedLabel === "-") {
+      return;
+    }
+
+    const beforeSize = allLabels.size;
+    allLabels.add(normalizedLabel);
+
+    if (allLabels.size !== beforeSize && labelsReady) {
+      const activeInput = document.activeElement;
+      if (activeInput && activeInput.classList.contains("label-input")) {
+        const suggestionsId = `label-suggestions-${activeInput.dataset.id}`;
+        showTableLabelSuggestions(suggestionsId, activeInput.value);
+      }
+    }
   }
 
   // 显示表格行标签建议列表
@@ -389,7 +407,7 @@
           const action =
             item.status === "已校验"
               ? '<span class="text-xs text-gray-400">已通过</span>'
-              : `<button class="pass-btn px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700" data-id="${item.id}">通过</button>`;
+              : `<button class="pass-btn px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700" data-id="${item.id}">确认</button>`;
 
           return `
           <tr>
@@ -426,6 +444,7 @@
           try {
             if (nextLabel !== previousLabel) {
               await updateLabel(id, nextLabel);
+              registerLabelSuggestion(nextLabel);
             }
             await verifyItem(id);
             window.showMessage("标签已自动通过", "success");
@@ -463,6 +482,7 @@
           }
           try {
             await updateLabel(id, label);
+            registerLabelSuggestion(label);
             window.showMessage("标签已更新，状态已重置为未校验", "success");
             await loadPage(window.currentPage);
             window.updateStats();

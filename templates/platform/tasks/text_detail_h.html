@@ -59,12 +59,25 @@
           共 {{ task.manual_annotated_count|default:"0" }} 条
         </div>
       </div>
-      <button
-        id="reload-list-btn"
-        class="text-xs text-blue-600 hover:text-blue-800"
-      >
-        刷新
-      </button>
+      <div class="flex items-center gap-2">
+        <label for="status-filter" class="text-sm text-gray-700"
+          >状态筛选</label
+        >
+        <select
+          id="status-filter"
+          class="border border-gray-300 rounded px-2 py-1 text-sm"
+        >
+          <option value="all">全部</option>
+          <option value="已校验">已校验</option>
+          <option value="未校验">未校验</option>
+        </select>
+        <button
+          id="reload-list-btn"
+          class="text-xs text-blue-600 hover:text-blue-800"
+        >
+          刷新
+        </button>
+      </div>
     </div>
     <div
       id="item-list"
@@ -148,7 +161,7 @@
             id="update-label-btn"
             class="w-full px-4 py-2 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-700 transition-colors text-sm"
           >
-            通过
+            确认该标注正确
           </button>
         </div>
       </div>
@@ -203,6 +216,7 @@
   let currentPage = 1;
   let totalPages = 1;
   let allLabels = new Set(); // 存储所有可能的标签
+  let activeStatus = "all";
 
   // 从表格中收集所有标签
   function collectLabelsFromTable() {
@@ -243,18 +257,17 @@
     if (allLabels.size === 0) {
       const tableLabels = collectLabelsFromTable();
       if (tableLabels.size > 0) {
-        allLabels.clear();
         tableLabels.forEach((label) => allLabels.add(label));
       }
     }
 
     if (!searchText.trim()) {
-      return Array.from(allLabels).slice(0, 10); // 默认显示前10个
+      return Array.from(allLabels); // 空搜索时显示全部标签
     }
     const lowerSearch = searchText.toLowerCase();
-    return Array.from(allLabels)
-      .filter((label) => label.toLowerCase().includes(lowerSearch))
-      .slice(0, 10); // 最多显示10个
+    return Array.from(allLabels).filter((label) =>
+      label.toLowerCase().includes(lowerSearch),
+    );
   }
 
   // 显示模态框标签建议列表
@@ -372,6 +385,9 @@
         page_size: String(pageSize),
         labeled_only: "1",
       });
+      if (activeStatus !== "all") {
+        params.set("status", activeStatus);
+      }
       const resp = await fetch(`/tasks/${taskId}/data/?${params.toString()}`);
       if (!resp.ok) throw new Error("加载数据失败");
       const data = await resp.json();
@@ -674,6 +690,13 @@
   document
     .getElementById("reload-list-btn")
     .addEventListener("click", () => loadPage(1));
+  const statusFilterEl = document.getElementById("status-filter");
+  if (statusFilterEl) {
+    statusFilterEl.addEventListener("change", (e) => {
+      activeStatus = e.target.value;
+      loadPage(1);
+    });
+  }
   document
     .getElementById("update-label-btn")
     .addEventListener("click", function () {

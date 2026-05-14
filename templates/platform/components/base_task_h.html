@@ -172,8 +172,7 @@
           {% if task.task_type == 'text-classification' and task_view_mode == 'labeled' %} 
           {{ task.manual_annotated_count|default:"0" }} 
           {% elif task.task_type == 'text-classification' and task_view_mode == 'manual'%} 
-          {{ unlabeled_count|default:"0" }} 
-          {% elif task_view_mode == 'unlabeled' %} 
+          {{ unlabeled_count|default:"0" }} {% elif task_view_mode == 'unlabeled' %} 
           {{ task.uploaded_total|default:"0" }} {% else %}
           {{task.total_count|default:"0" }} {% endif %}
         </dd>
@@ -439,7 +438,7 @@
         console.error(`任务 ${taskId} 进度轮询请求失败:`, error);
         // 即使请求失败，也继续轮询，除非是404或明确的停止信号
       }
-    }, 3000); // 每3秒更新一次
+    }, 1000); // 每1秒更新一次
 
     taskPollingIntervals.set(taskId, intervalId);
   }
@@ -633,7 +632,7 @@
     }
 
     const confirmed = confirm(
-      "确认删除这个任务吗？如果任务正在进行，系统会同步撤销 Celery 任务并清理队列中的残留消息。",
+      "确认删除这个任务吗？",
     );
     if (!confirmed) {
       return;
@@ -679,7 +678,7 @@
     }
 
     const confirmed = confirm(
-      "确认重新调用半监督算法吗？系统会基于当前人工标注结果重新训练。",
+      "确认重新训练吗？",
     );
     if (!confirmed) {
       return;

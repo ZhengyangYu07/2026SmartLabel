@@ -188,7 +188,8 @@
       }
       const data = await response.json();
       if (data.status === "success" && data.labels && data.labels.length > 0) {
-        allLabels.clear();
+        // 合并后端标签而不是直接覆盖，避免丢失刚刚本地添加的标签
+        const fetched = new Set(data.labels);
         data.labels.forEach((label) => allLabels.add(label));
         console.log("从API获取到标签:", Array.from(allLabels));
       } else {
@@ -196,6 +197,25 @@
       }
     } catch (error) {
       console.error("获取标签时出错:", error);
+    }
+  }
+
+  // 注册新标签并刷新建议
+  function registerLabelSuggestion(label) {
+    const normalizedLabel = (label || "").trim();
+    if (!normalizedLabel || normalizedLabel === "-") {
+      return;
+    }
+
+    const beforeSize = allLabels.size;
+    allLabels.add(normalizedLabel);
+
+    // 如果新标签被添加，且标签输入框当前有focus，刷新建议
+    if (allLabels.size !== beforeSize) {
+      const labelInput = document.getElementById("manual-label-input");
+      if (labelInput === document.activeElement) {
+        showLabelSuggestions(labelInput.value);
+      }
     }
   }
 
@@ -211,12 +231,12 @@
     }
 
     if (!searchText.trim()) {
-      return Array.from(allLabels).slice(0, 10); // 默认显示前10个
+      return Array.from(allLabels); // 空搜索时显示全部标签
     }
     const lowerSearch = searchText.toLowerCase();
-    return Array.from(allLabels)
-      .filter((label) => label.toLowerCase().includes(lowerSearch))
-      .slice(0, 10); // 最多显示10个
+    return Array.from(allLabels).filter((label) =>
+      label.toLowerCase().includes(lowerSearch),
+    );
   }
 
   // 显示标签建议列表
@@ -382,6 +402,16 @@
     }
 
     highlightActiveCandidate();
+
+    if (autoFocusLabelInput) {
+      requestAnimationFrame(() => {
+        const labelInput = document.getElementById("manual-label-input");
+        if (labelInput) {
+          labelInput.focus();
+          showLabelSuggestions("", handleLabelSuggestionSelect);
+        }
+      });
+    }
   }
 
   function removeCurrentCandidate() {
@@ -435,10 +465,24 @@
     }
 
     showToast(data.message || "人工标注已保存", "success");
+
+    // 立即把新标签加入本地集合，然后异步合并后端标签，最后跳到下一个并展示完整标签列表
     try {
-      await initPage(true);
+      registerLabelSuggestion(label);
+      fetchAllLabels().catch((e) => console.warn("刷新标签列表失败", e));
+
+      // 不整页重新加载，移除当前样本并跳转到下一个
+      removeCurrentCandidate();
+      requestAnimationFrame(() => {
+        const labelInput = document.getElementById("manual-label-input");
+        if (labelInput) {
+          labelInput.focus();
+          // 空搜索展示所有标签，包括刚刚注册的标签
+          showLabelSuggestions("", handleLabelSuggestionSelect);
+        }
+      });
     } catch (e) {
-      console.warn("重新加载候选列表失败", e);
+      console.warn("处理保存后跳转失败", e);
     }
     if (window.refreshTaskStatistics) {
       try {
@@ -472,16 +516,7 @@
       candidateItems = await fetchAllCandidates();
       renderCandidateList();
       if (candidateItems.length > 0) {
-        selectCandidate(0, false);
-        if (autoFocusNext) {
-          requestAnimationFrame(() => {
-            const labelInput = document.getElementById("manual-label-input");
-            if (labelInput) {
-              labelInput.focus();
-              showLabelSuggestions("", handleLabelSuggestionSelect);
-            }
-          });
-        }
+        selectCandidate(0, autoFocusNext);
       } else {
         resetPreview();
       }
@@ -537,8 +572,18 @@
     });
 
   document.getElementById("manual-label-input").addEventListener("blur", () => {
-    // 延迟隐藏，以便用户点击列表项
-    setTimeout(hideLabelSuggestions, 200);
+    // 延迟隐藏，以便用户点击列表项或在快速切换时重新获得焦点
+    setTimeout(() => {
+      const labelInput = document.getElementById("manual-label-input");
+      const suggestions = document.getElementById("label-suggestions");
+      const active = document.activeElement;
+      if (
+        active !== labelInput &&
+        !(suggestions && suggestions.contains(active))
+      ) {
+        hideLabelSuggestions();
+      }
+    }, 200);
   });
 
   document.addEventListener("DOMContentLoaded", async () => {

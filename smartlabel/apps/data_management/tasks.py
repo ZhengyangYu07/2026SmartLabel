@@ -247,7 +247,7 @@ def run_subprocess_with_progress(cmd, task_id, total_files=None):
 
 # 将结果保存到数据库
 def save_results_to_database(result_file_path, task, task_type, update_progress_func):
-    """保存结果到数据库"""
+    """保存结果到数据库，并在落库阶段动态推进任务进度。"""
     if not result_file_path.exists():
         logger.error(f"未找到结果文件: {result_file_path}")
         raise FileNotFoundError(f"未找到结果文件: {result_file_path}")
@@ -267,8 +267,6 @@ def save_results_to_database(result_file_path, task, task_type, update_progress_
         logger.error(f"清除任务 {task.id} 的旧记录时失败: {e}")
         raise  # 如果删除失败，则终止操作
 
-    batch_size = 100
-
     def _safe_float(value, default=0.0):
         try:
             if value in (None, ''):
@@ -277,9 +275,19 @@ def save_results_to_database(result_file_path, task, task_type, update_progress_
         except (TypeError, ValueError):
             return default
 
+    progress_start = 85
+    progress_end = 99
+
     with open(result_file_path, newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         results_data = list(reader)  # 先读取所有数据到列表
+
+        if not results_data:
+            _update_task_progress(task, progress_end)
+            return
+
+        # 让落库阶段按数据量动态推进，而不是在最后一次性跳到 100%。
+        batch_size = max(1, (len(results_data) + 19) // 20)
 
         instances_to_create = []
         for i, res_data in enumerate(results_data):
@@ -314,11 +322,15 @@ def save_results_to_database(result_file_path, task, task_type, update_progress_
             if (i + 1) % batch_size == 0 or (i + 1) == len(results_data):
                 with transaction.atomic():  # 确保批次操作的原子性
                     ResultModel.objects.bulk_create(instances_to_create)
-                update_progress_func(i + 1, len(results_data))
+
+                stage_progress = progress_start + round(
+                    ((i + 1) / len(results_data)) * (progress_end - progress_start)
+                )
+                _update_task_progress(task, stage_progress)
                 instances_to_create = []  # 清空列表，准备下一个批次
 
-        # 确保进度达到100%
-        update_progress_func(len(results_data), len(results_data))
+        # 落库阶段结束时，保留最后一点给任务完成状态。
+        _update_task_progress(task, progress_end)
 
 
 # 辅助函数，用于处理通用的任务逻辑和子进程调用

@@ -34,7 +34,7 @@
           <th class="px-4 py-3">内容</th>
           <th class="px-4 py-3">预测标签</th>
           <th class="px-4 py-3">置信度</th>
-          <th class="px-4 py-3">操作</th>
+          <th class="px-4 py-3">是否将该数据添加为标签</th>
         </tr>
       </thead>
       <tbody id="unlabeled-table-body" class="divide-y divide-gray-100"></tbody>
@@ -165,6 +165,24 @@
     return Array.from(allLabels).filter((label) =>
       label.toLowerCase().includes(lowerSearch),
     );
+  }
+
+  function registerLabelSuggestion(label) {
+    const normalizedLabel = (label || "").trim();
+    if (!normalizedLabel || normalizedLabel === "-") {
+      return;
+    }
+
+    const beforeSize = allLabels.size;
+    allLabels.add(normalizedLabel);
+
+    if (allLabels.size !== beforeSize && labelsReady) {
+      const activeInput = document.activeElement;
+      if (activeInput && activeInput.classList.contains("pred-label-input")) {
+        const suggestionsId = `label-suggestions-${activeInput.dataset.id}`;
+        showTableLabelSuggestions(suggestionsId, activeInput.value);
+      }
+    }
   }
 
   // 显示表格行标签建议列表
@@ -403,6 +421,7 @@
         }
         try {
           await addToLabeled(rowId, label);
+          registerLabelSuggestion(label);
           window.showMessage("已加入已标注列表（状态：未校验）", "success");
           await loadPage(window.currentPage);
           window.updateStats();

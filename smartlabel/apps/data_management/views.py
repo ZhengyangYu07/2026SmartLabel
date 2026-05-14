@@ -956,7 +956,7 @@ def manual_annotation(request, task_id):
         'unlabeled_count': unlabeled_count,
     })
 
-    template_name = 'platform/tasks/manual_annotation_text_h.html' if task.task_type == 'text-classification' else 'platform/tasks/manual_annotation_h.html'
+    template_name = 'platform/tasks/unlabeled-detail_text_h.html' if task.task_type == 'text-classification' else 'platform/tasks/manual_annotation_h.html'
     return render(request, template_name, context)
 
 
