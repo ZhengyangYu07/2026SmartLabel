@@ -39,6 +39,19 @@ TASK_CONFIG = {
         ],
         'relation_field': 'task'
     }
+    ,
+    'object-detection': {
+        'result_model': ImageResult,
+        'detail_template': 'platform/tasks/detection_detail_h.html',
+        'csv_fields': [
+            ('id', 'ID'),
+            ('image_name', '文件名'),
+            ('image_path', '文件路径'),
+            ('annotations', '标注(JSON)'),
+            ('status', '校验状态')
+        ],
+        'relation_field': 'task'
+    }
 }
 
 

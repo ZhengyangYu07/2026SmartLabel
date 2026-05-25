@@ -39,6 +39,8 @@ urlpatterns = [
     path('tasks/<int:task_id>/export/', views.export_data, name='export_data'),
     path('tasks/<int:task_id>/verify/', views.verify_item, name='verify_item'),
     path('tasks/<int:task_id>/data/', views.task_data, name='task_data'),
+    path('tasks/<int:task_id>/detection/save/', views.save_detection_annotations, name='save_detection_annotations'),
+    path('tasks/<int:task_id>/detection/export_labelme/', views.export_detection_labelme, name='export_detection_labelme'),
     path('api/tasks/<int:task_id>/denoise/', views.perform_denoise, name='perform_denoise'),
     path('tasks/<int:task_id>/confirm_denoise/', views.confirm_denoise, name='confirm_denoise'),
 ]

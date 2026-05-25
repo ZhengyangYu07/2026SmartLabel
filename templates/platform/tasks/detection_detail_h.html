@@ -1,0 +1,610 @@
+{% extends "platform/components/base_task_h.html" %}
+{% load static %}
+
+{% block task_page_title %}&#30446;&#26631;&#26816;&#27979;&#26631;&#27880;{% endblock %}
+
+{% block css %}
+{{ block.super }}
+<style>
+  .lm-window {
+    height: 720px;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: 46px 1fr 28px;
+    border: 1px solid #b7c0cc;
+    border-radius: 10px;
+    background: #dfe4ea;
+    color: #111827;
+    overflow: hidden;
+    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
+  }
+  .lm-topbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    background: #eef2f7;
+    border-bottom: 1px solid #cbd5e1;
+    overflow-x: auto;
+  }
+  .lm-tool,
+  .lm-button {
+    height: 34px;
+    min-width: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px solid #b8c2cf;
+    border-radius: 4px;
+    background: linear-gradient(#fff, #e9eef5);
+    color: #111827;
+    font-size: 13px;
+    padding: 0 10px;
+    white-space: nowrap;
+  }
+  .lm-tool:hover,
+  .lm-button:hover { background: #e0e7ef; }
+  .lm-tool:disabled,
+  .lm-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+  .lm-tool.active {
+    background: #dbeafe;
+    border-color: #2563eb;
+    color: #1d4ed8;
+  }
+  .lm-separator {
+    width: 1px;
+    height: 28px;
+    background: #cbd5e1;
+    margin: 0 3px;
+    flex: 0 0 auto;
+  }
+  .lm-body {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 66px minmax(0, 1fr) 350px;
+  }
+  .lm-leftbar {
+    background: #f8fafc;
+    border-right: 1px solid #cbd5e1;
+    padding: 8px 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+  }
+  .lm-leftbar .lm-tool {
+    width: 50px;
+    height: 48px;
+    padding: 0;
+    flex-direction: column;
+    font-size: 12px;
+  }
+  .lm-canvas-area {
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    background: #747b86;
+    overflow: auto;
+  }
+  .lm-canvas-scroll {
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .draw-canvas {
+    position: relative;
+    display: inline-block;
+    background: #111827;
+    box-shadow: 0 16px 50px rgba(0, 0, 0, 0.35);
+    cursor: crosshair;
+  }
+  .draw-canvas img {
+    display: block;
+    max-width: min(100%, calc(100vw - 560px));
+    max-height: 580px;
+    user-select: none;
+  }
+  .shape-svg {
+    position: absolute;
+    left: 0;
+    top: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .bbox {
+    position: absolute;
+    border: 2px solid #00ff66;
+    box-sizing: border-box;
+    pointer-events: auto;
+  }
+  .bbox-source-model { border-color: #2563eb; border-style: dashed; }
+  .bbox-status-accepted { border-color: #16a34a; border-style: solid; }
+  .bbox-status-modified,
+  .bbox-status-manual,
+  .bbox-source-manual { border-color: #eab308; border-style: solid; }
+  .bbox-status-rejected {
+    border-color: #dc2626;
+    border-style: solid;
+    opacity: 0.72;
+  }
+  .bbox-status-rejected::before,
+  .bbox-status-rejected::after {
+    content: "";
+    position: absolute;
+    left: -3px;
+    top: 50%;
+    width: calc(100% + 6px);
+    height: 2px;
+    background: #dc2626;
+  }
+  .bbox-status-rejected::before { transform: rotate(32deg); }
+  .bbox-status-rejected::after { transform: rotate(-32deg); }
+  .bbox-low-confidence {
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.9);
+  }
+  .bbox-active,
+  .bbox-draft { border-style: dashed; border-color: #ffcc00; }
+  .bbox-handle {
+    position: absolute;
+    width: 9px;
+    height: 9px;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    background: #ffcc00;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+    display: none;
+    z-index: 3;
+  }
+  .bbox-active .bbox-handle { display: block; }
+  .bbox-handle[data-handle="nw"] { left: -6px; top: -6px; cursor: nwse-resize; }
+  .bbox-handle[data-handle="ne"] { right: -6px; top: -6px; cursor: nesw-resize; }
+  .bbox-handle[data-handle="sw"] { left: -6px; bottom: -6px; cursor: nesw-resize; }
+  .bbox-handle[data-handle="se"] { right: -6px; bottom: -6px; cursor: nwse-resize; }
+  .shape-line,
+  .shape-polyline,
+  .shape-polygon,
+  .shape-point {
+    pointer-events: stroke;
+    cursor: pointer;
+  }
+  .shape-active { filter: drop-shadow(0 0 4px #ffcc00); }
+  .shape-polygon {
+    fill-opacity: 0.06;
+    stroke-opacity: 0.95;
+  }
+  .bbox-label {
+    position: absolute;
+    transform: translateY(-100%);
+    background: #064e3b;
+    color: #fff;
+    font-size: 12px;
+    line-height: 1;
+    padding: 3px 6px;
+    border-radius: 3px 3px 0 0;
+    pointer-events: none;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .uncertainty-heatmap {
+    position: absolute;
+    left: 0;
+    top: 0;
+    pointer-events: none;
+    display: none;
+    mix-blend-mode: multiply;
+    opacity: 0.36;
+    background:
+      radial-gradient(circle at 28% 34%, rgba(249, 115, 22, 0.72), transparent 28%),
+      radial-gradient(circle at 70% 58%, rgba(234, 179, 8, 0.62), transparent 30%),
+      radial-gradient(circle at 48% 78%, rgba(239, 68, 68, 0.46), transparent 22%);
+  }
+  .uncertainty-heatmap.visible { display: block; }
+  .lm-docks {
+    min-height: 0;
+    background: #eef2f7;
+    border-left: 1px solid #cbd5e1;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    gap: 6px;
+    padding: 6px;
+  }
+  .lm-dock {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    border: 1px solid #b8c2cf;
+  }
+  .lm-dock-title {
+    min-height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 8px;
+    background: linear-gradient(#f8fafc, #e2e8f0);
+    border-bottom: 1px solid #cbd5e1;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .lm-dock-body { min-height: 0; overflow: auto; }
+  .det-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+    padding: 6px;
+    background: #eef2f7;
+  }
+  .det-tab {
+    height: 30px;
+    border: 1px solid #b8c2cf;
+    border-radius: 4px;
+    background: #fff;
+    font-size: 13px;
+  }
+  .det-tab.active {
+    border-color: #2563eb;
+    background: #dbeafe;
+    color: #1d4ed8;
+    font-weight: 700;
+  }
+  .det-panel {
+    min-height: 0;
+    display: none;
+  }
+  .det-panel.active {
+    display: flex;
+    flex-direction: column;
+  }
+  .lm-filter {
+    display: grid;
+    gap: 6px;
+    padding: 8px;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .lm-select {
+    height: 30px;
+    border: 1px solid #b8c2cf;
+    border-radius: 3px;
+    padding: 0 8px;
+    background: #fff;
+    font-size: 13px;
+  }
+  .det-object-row,
+  .det-image-row,
+  .det-label-row {
+    width: 100%;
+    display: grid;
+    gap: 6px;
+    padding: 7px 8px;
+    border-bottom: 1px solid #edf2f7;
+    text-align: left;
+    font-size: 13px;
+  }
+  .det-object-row { grid-template-columns: 22px 1fr auto; align-items: center; }
+  .det-card-actions {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+  }
+  .det-mini-btn {
+    height: 26px;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    background: #fff;
+    font-size: 12px;
+  }
+  .det-mini-btn.accept { color: #166534; border-color: #86efac; background: #f0fdf4; }
+  .det-mini-btn.modify { color: #92400e; border-color: #fcd34d; background: #fffbeb; }
+  .det-mini-btn.reject { color: #991b1b; border-color: #fecaca; background: #fef2f2; }
+  .det-label-editor {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 112px;
+    gap: 6px;
+  }
+  .det-label-input,
+  .det-label-select {
+    height: 28px;
+    min-width: 0;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    background: #fff;
+    padding: 0 7px;
+    font-size: 12px;
+  }
+  .det-progress {
+    height: 6px;
+    background: #e5e7eb;
+    border-radius: 999px;
+    overflow: hidden;
+    margin-top: 5px;
+  }
+  .det-progress span {
+    display: block;
+    height: 100%;
+    background: #2563eb;
+  }
+  .det-info-grid {
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+  }
+  .det-info-item {
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 9px;
+    background: #fff;
+  }
+  .det-info-label {
+    display: block;
+    color: #64748b;
+    font-size: 12px;
+  }
+  .det-info-value {
+    display: block;
+    margin-top: 4px;
+    color: #111827;
+    font-weight: 700;
+  }
+  .det-image-row { grid-template-columns: 54px 1fr; align-items: center; }
+  .det-label-row { grid-template-columns: 14px 1fr; align-items: center; }
+  .det-object-row:hover,
+  .det-object-row.active,
+  .det-image-row:hover,
+  .det-image-row.active,
+  .det-label-row:hover,
+  .det-label-row.active { background: #dbeafe; }
+  .det-image-row img {
+    width: 54px;
+    height: 40px;
+    object-fit: cover;
+    border: 1px solid #cbd5e1;
+    background: #f3f4f6;
+  }
+  .det-name {
+    display: block;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .det-meta {
+    margin-top: 3px;
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+    color: #64748b;
+    font-size: 12px;
+  }
+  .det-chip {
+    display: inline-flex;
+    align-items: center;
+    height: 20px;
+    border-radius: 3px;
+    padding: 0 6px;
+    background: #f1f5f9;
+    color: #334155;
+    font-size: 12px;
+  }
+  .det-chip.hot { background: #fee2e2; color: #991b1b; }
+  .det-chip.ok { background: #dcfce7; color: #166534; }
+  .lm-color-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #22c55e;
+    border: 1px solid rgba(0, 0, 0, 0.25);
+  }
+  .lm-statusbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 0 10px;
+    background: #f8fafc;
+    border-top: 1px solid #cbd5e1;
+    color: #475569;
+    font-size: 12px;
+  }
+  .det-empty {
+    color: #64748b;
+    text-align: center;
+    padding: 22px 12px;
+    font-size: 13px;
+  }
+  .det-toast {
+    position: fixed;
+    right: 20px;
+    top: 20px;
+    z-index: 999;
+    min-width: 220px;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 14px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+    color: #fff;
+    display: none;
+  }
+  .det-toast.success { background: #15803d; }
+  .det-toast.error { background: #b91c1c; }
+  .det-toast.warning { background: #b45309; }
+  @media (max-width: 1100px) {
+    .lm-window { height: auto; min-height: 720px; }
+    .lm-body { grid-template-columns: 54px 1fr; }
+    .lm-docks { grid-column: 1 / -1; min-height: 360px; grid-template-rows: auto 1fr; }
+    .draw-canvas img { max-width: 84vw; max-height: 68vh; }
+  }
+</style>
+{% endblock %}
+
+{% block task_table %}
+<div class="lm-window mt-4">
+  <div class="lm-topbar">
+    <button id="prev-image-btn" type="button" class="lm-tool" title="&#19978;&#19968;&#24352;">&#19978;&#19968;&#24352;</button>
+    <button id="next-image-btn" type="button" class="lm-tool" title="&#19979;&#19968;&#24352;">&#19979;&#19968;&#24352;</button>
+    <button id="save-boxes-btn" type="button" class="lm-tool" title="&#20445;&#23384;">&#20445;&#23384;</button>
+    <span class="lm-separator"></span>
+    <button id="accept-all-btn" type="button" class="lm-tool">&#20840;&#37096;&#25509;&#21463;</button>
+    <button id="heatmap-toggle-btn" type="button" class="lm-tool">&#28909;&#21147;&#22270;</button>
+    <button id="finish-polygon-btn" type="button" class="lm-tool">&#23436;&#25104;&#22810;&#36793;&#24418;</button>
+    <span id="mode-badge" class="det-chip">&#39044;&#26631;&#27880;&#26657;&#39564;</span>
+    <span class="lm-separator"></span>
+    <button id="select-mode-btn" type="button" class="lm-tool">&#36873;&#25321;</button>
+    <button id="delete-box-btn" type="button" class="lm-tool">&#21024;&#38500;</button>
+    <span class="lm-separator"></span>
+    <button id="fit-window-btn" type="button" class="lm-tool">&#36866;&#24212;</button>
+    <button id="zoom-in-btn" type="button" class="lm-tool">&#25918;&#22823;</button>
+    <button id="zoom-out-btn" type="button" class="lm-tool">&#32553;&#23567;</button>
+  </div>
+
+  <div class="lm-body">
+    <div class="lm-leftbar">
+      <button id="draw-rect-btn" type="button" class="lm-tool active" data-tool="rectangle" title="&#30697;&#24418;">&#30697;&#24418;</button>
+      <button id="draw-polygon-btn" type="button" class="lm-tool" data-tool="polygon" title="&#22810;&#36793;&#24418;">&#22810;&#36793;&#24418;</button>
+      <button id="draw-point-btn" type="button" class="lm-tool" data-tool="point" title="&#28857;">&#28857;</button>
+      <button id="draw-line-btn" type="button" class="lm-tool" data-tool="line" title="&#32447;">&#32447;</button>
+      <span class="lm-separator" style="width:36px;height:1px;"></span>
+      <button type="button" class="lm-tool" title="AI &#39044;&#26631;&#27880;" id="det-ai-hint-btn">AI</button>
+    </div>
+
+    <main class="lm-canvas-area">
+      <div class="lm-canvas-scroll">
+        <div class="draw-canvas" id="draw-canvas-container">
+          <img id="detection-image" src="" alt="&#24453;&#26631;&#27880;&#22270;&#29255;" draggable="false">
+          <div id="uncertainty-heatmap" class="uncertainty-heatmap"></div>
+        </div>
+      </div>
+    </main>
+
+    <aside class="lm-docks">
+      <div class="det-tabs">
+        <button type="button" class="det-tab active" data-panel="boxes">&#26631;&#27880;&#26694;</button>
+        <button type="button" class="det-tab" data-panel="sample">&#26679;&#26412;&#20449;&#24687;</button>
+        <button type="button" class="det-tab" data-panel="labels">&#26631;&#31614;&#37197;&#32622;</button>
+      </div>
+
+      <section class="lm-dock det-panel active" id="panel-boxes">
+        <div class="lm-dock-title">
+          <span>&#26631;&#27880;&#26694;&#21015;&#34920;</span>
+          <span id="box-count-chip" class="det-chip">0 &#20010;&#24418;&#29366;</span>
+        </div>
+        <div id="object-list" class="lm-dock-body"></div>
+      </section>
+
+      <section class="lm-dock det-panel" id="panel-sample">
+        <div class="lm-dock-title">&#26679;&#26412;&#20449;&#24687;</div>
+        <div class="det-info-grid">
+          <div class="det-info-item">
+            <span class="det-info-label">&#19981;&#30830;&#23450;&#24615;&#20998;&#25968;</span>
+            <span class="det-info-value" id="sample-uncertainty">-</span>
+          </div>
+          <div class="det-info-item">
+            <span class="det-info-label">&#37319;&#26679;&#31574;&#30053;</span>
+            <span class="det-info-value" id="sample-strategy">Entropy</span>
+          </div>
+          <div class="det-info-item">
+            <span class="det-info-label">&#27169;&#22411;&#36845;&#20195;&#29256;&#26412;</span>
+            <span class="det-info-value" id="sample-model-version">v1</span>
+          </div>
+          <div class="det-info-item">
+            <span class="det-info-label">&#38431;&#21015;&#20248;&#20808;&#32423;</span>
+            <span class="det-info-value" id="sample-priority">-</span>
+          </div>
+        </div>
+        <div class="lm-dock-title">&#22270;&#29255;&#38431;&#21015;</div>
+        <div class="lm-filter">
+          <select id="status-filter" class="lm-select">
+            <option value="all">&#20840;&#37096;&#29366;&#24577;</option>
+            <option value="verified">&#24050;&#26657;&#39564;</option>
+            <option value="unverified">&#26410;&#26657;&#39564;</option>
+          </select>
+          <select id="sort-filter" class="lm-select">
+            <option value="uncertainty:desc">&#19981;&#30830;&#23450;&#24615;&#39640;&#21040;&#20302;</option>
+            <option value="uncertainty:asc">&#19981;&#30830;&#23450;&#24615;&#20302;&#21040;&#39640;</option>
+            <option value="confidence:asc">&#32622;&#20449;&#24230;&#20302;&#21040;&#39640;</option>
+            <option value="confidence:desc">&#32622;&#20449;&#24230;&#39640;&#21040;&#20302;</option>
+          </select>
+        </div>
+        <div id="detection-image-list" class="lm-dock-body"></div>
+        <div id="detection-pager" class="lm-dock-title"></div>
+      </section>
+
+      <section class="lm-dock det-panel" id="panel-labels">
+        <div class="lm-dock-title">&#26631;&#31614;&#37197;&#32622;</div>
+        <div class="lm-filter">
+          <select id="box-label-select" class="lm-select">
+            <option value="">&#36873;&#25321;&#26631;&#31614;</option>
+          </select>
+        </div>
+        <div id="label-list-panel" class="lm-dock-body"></div>
+        <div class="lm-dock-title">&#22270;&#29255;&#21015;&#34920; / &#20027;&#21160;&#23398;&#20064;</div>
+        <div class="det-info-grid">
+          <div class="det-info-item">
+            <span class="det-info-label">A</span>
+            <span class="det-info-value">&#25509;&#21463;&#24403;&#21069;&#26694;</span>
+          </div>
+          <div class="det-info-item">
+            <span class="det-info-label">R</span>
+            <span class="det-info-value">&#25298;&#32477;&#24403;&#21069;&#26694;</span>
+          </div>
+          <div class="det-info-item">
+            <span class="det-info-label">Delete</span>
+            <span class="det-info-value">&#21024;&#38500;&#24403;&#21069;&#26694;</span>
+          </div>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <div class="lm-statusbar">
+    <span id="current-image-name">&#35831;&#36873;&#25321;&#22270;&#29255;</span>
+    <span id="current-image-meta">&#24418;&#29366;&#65306;0 / &#19981;&#30830;&#23450;&#24615;&#65306;-</span>
+    <span id="queue-meta">&#38431;&#21015;&#65306;-</span>
+  </div>
+</div>
+
+<div id="det-toast" class="det-toast"></div>
+{% endblock %}
+
+{% block js %}
+{{ block.super }}
+<script>
+  window.detectionTaskId = "{{ task.id }}";
+  window.detectionViewMode = "{{ task_view_mode|default:'labeled' }}";
+  window.detectionTaskLabels = {{ labels_json|default:'[]'|safe }};
+  window.currentImageItem = null;
+
+  window.getCookie = function (name) {
+    const cookieValue = document.cookie
+      .split('; ')
+      .find((row) => row.startsWith(name + '='));
+    return cookieValue ? decodeURIComponent(cookieValue.split('=')[1]) : null;
+  };
+
+  window.showMessage = function (msg, type = 'success') {
+    const toast = document.getElementById('det-toast');
+    if (!toast) {
+      alert(msg);
+      return;
+    }
+    toast.className = `det-toast ${type}`;
+    toast.textContent = msg;
+    toast.style.display = 'block';
+    window.setTimeout(() => {
+      toast.style.display = 'none';
+    }, 2200);
+  };
+</script>
+<script src="{% static 'js/detection_labelme.js' %}?v=20260517-detection-filter"></script>
+{% endblock %}

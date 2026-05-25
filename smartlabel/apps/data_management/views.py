@@ -18,7 +18,7 @@ from django.core.exceptions import ValidationError, PermissionDenied
 from django.core.paginator import Paginator, EmptyPage
 from django.core.cache import cache
 from django.db.models import F, Case, When, Value, Q, Count, FloatField, Exists, OuterRef, BooleanField
-from django.http import JsonResponse, HttpResponse
+from django.http import JsonResponse, HttpResponse, FileResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.shortcuts import render
 from django.utils import timezone
@@ -27,6 +27,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 from io import StringIO
 from kombu.utils import json
 from pathlib import Path
+from PIL import Image
 from django.db.models.functions import Lower
 from django.db import transaction
 from functools import reduce
@@ -40,11 +41,15 @@ from celery import current_app as celery_app
 from celery.exceptions import OperationalError
 
 from .models import Task, ImageResult, TextResult, FavoriteTask
-from .tasks import process_annotation_task, process_pretrained_task
 from .utils import process
 from .utils.config import TASK_CONFIG, TaskService
 
 logger = logging.getLogger(__name__)
+
+
+def _get_task_runners():
+    from .tasks import process_annotation_task, process_pretrained_task
+    return process_annotation_task, process_pretrained_task
 
 
 def _get_configured_queue_names():
@@ -185,6 +190,37 @@ def _check_compressed_file_contents(file_list, task_type):
             return {'status': 'error', 'message': f'文本分类任务压缩包中检测到非CSV数据文件: "{other_non_system_files[0]}"。请确保压缩包只包含CSV文件。'}
         
         return {'status': 'success', 'message': '数据文件内容符合文本分类任务要求。'}
+    elif task_type == 'object-detection':
+        # 支持多种标注格式：COCO (instances.json), VOC (annotations/*.xml), YOLO (labels/*.txt + classes.txt), CSV（image,xmin,ymin,xmax,ymax,class）
+        lowered = [f.lower() for f in actual_files]
+
+        # COCO: instances*.json 或 annotations/*.json
+        has_coco = any(os.path.basename(f).startswith('instances') and f.endswith('.json') for f in lowered) or any(f.endswith('.json') and os.path.dirname(f).endswith('annotations') for f in lowered)
+
+        # Pascal VOC: annotations/*.xml
+        has_voc = any(f.endswith('.xml') and os.path.dirname(f).endswith('annotations') for f in lowered) or any(f.endswith('.xml') for f in lowered)
+
+        # YOLO: labels/*.txt + classes.txt
+        has_yolo_labels = any(os.path.dirname(f).endswith('labels') and f.endswith('.txt') for f in lowered)
+        has_classes = any(os.path.basename(f) in ('classes.txt', 'obj.names') for f in lowered)
+
+        # CSV manifest
+        has_csv = any(f.endswith('.csv') for f in lowered)
+
+        if has_coco:
+            return {'status': 'success', 'message': '检测到 COCO 格式标注 (instances.json)，数据符合目标检测要求。'}
+
+        if has_voc:
+            return {'status': 'success', 'message': '检测到 VOC (XML) 格式标注，数据符合目标检测要求。'}
+
+        if has_yolo_labels and has_classes:
+            return {'status': 'success', 'message': '检测到 YOLO 格式标注 (labels/ + classes.txt)，数据符合目标检测要求。'}
+
+        if has_csv:
+            # 简单判断 CSV 是否可能为标注清单（不做深入解析）
+            return {'status': 'success', 'message': '检测到 CSV 标注清单，数据可能符合目标检测要求。'}
+
+        return {'status': 'error', 'message': '目标检测任务未检测到支持的标注格式 (COCO/VOC/YOLO/CSV)。请检查压缩包是否包含 images/ 目录与相应标注文件。'}
 
     else:
         return {'status': 'error', 'message': '不支持的任务类型。'}
@@ -356,12 +392,15 @@ def submit_task(request):
         if raw_labeling_type in ('pre-trained', 'semi-supervised'):
             labeling_type = raw_labeling_type
         else:
-            labeling_type = 'semi-supervised' if label_file else 'pre-trained'
+            labeling_type = 'semi-supervised' if label_file or task_type in ('image-classification', 'text-classification') else 'pre-trained'
             logger.warning(
                 "submit_task 未收到有效 labeling_type，已自动推断为 %s (raw=%r)",
                 labeling_type,
                 raw_labeling_type,
             )
+
+        if task_type in ('image-classification', 'text-classification') and not label_file:
+            labeling_type = 'semi-supervised'
 
         if not task_name or not task_type or not data_file:
             return JsonResponse({'status': 'error', 'message': '任务名称、任务类型和数据文件为必填项'}, status=400)
@@ -534,12 +573,28 @@ def submit_task(request):
         # 启动Celery任务时传递任务类型
         try:
             celery_task = None
-            if labeling_type == 'pre-trained':
-                # 预训练模式下使用process_pretrained_task
-                celery_task = process_pretrained_task.apply_async(
+            process_annotation_task, process_pretrained_task = _get_task_runners()
+            if (
+                task.task_type in ('image-classification', 'text-classification')
+                and not task.label_file
+            ):
+                celery_task = process_annotation_task.apply_async(
                     args=[task.id],
-                    task_id=f'pretrained_{task.id}_{uuid.uuid4().hex[:6]}'
+                    task_id=f'coldstart_{task.id}_{uuid.uuid4().hex[:6]}'
                 )
+            elif labeling_type == 'pre-trained':
+                # 若为目标检测任务，预训练模式目前使用半监督的处理函数（process_annotation_task）来完成训练流程
+                if task.task_type == 'object-detection':
+                    celery_task = process_annotation_task.apply_async(
+                        args=[task.id],
+                        task_id=f'pretrained_detection_{task.id}_{uuid.uuid4().hex[:6]}'
+                    )
+                else:
+                    # 图像/文本分类使用预训练处理函数
+                    celery_task = process_pretrained_task.apply_async(
+                        args=[task.id],
+                        task_id=f'pretrained_{task.id}_{uuid.uuid4().hex[:6]}'
+                    )
             elif labeling_type == 'semi-supervised':
                 # 半监督模式下使用原有的process_annotation_task
                 celery_task = process_annotation_task.apply_async(
@@ -609,11 +664,30 @@ def get_task_meta_data(request, task_id):
         relation_field = config['relation_field']
 
         # 获取所有唯一的标签
-        # 排除 None 或空字符串的标签
-        labels = list(result_model.objects.filter(
-            **{relation_field: task}
-        ).exclude(label__isnull=True).exclude(label__exact='')
-        .values_list('label', flat=True).distinct().order_by('label'))
+        # 目标检测标签可能存放在 annotations[].label 中；图像/文本分类仍沿用 label 字段。
+        if task.task_type == 'object-detection':
+            label_set = set()
+            if task.label_list:
+                for lbl in task.label_list:
+                    if isinstance(lbl, str) and lbl.strip():
+                        label_set.add(lbl.strip())
+
+            detection_items = result_model.objects.filter(**{relation_field: task}).only('annotations', 'label')
+            for det_item in detection_items:
+                if det_item.label and str(det_item.label).strip():
+                    label_set.add(str(det_item.label).strip())
+                for ann in (det_item.annotations or []):
+                    lbl = (ann or {}).get('label')
+                    if isinstance(lbl, str) and lbl.strip():
+                        label_set.add(lbl.strip())
+
+            labels = sorted(label_set)
+        else:
+            # 排除 None 或空字符串的标签
+            labels = list(result_model.objects.filter(
+                **{relation_field: task}
+            ).exclude(label__isnull=True).exclude(label__exact='')
+            .values_list('label', flat=True).distinct().order_by('label'))
 
         # 获取所有唯一的置信度
         confidences_raw = list(result_model.objects.filter(
@@ -712,6 +786,10 @@ def _manual_label_manifest_path(task_id):
     return Path(settings.MEDIA_ROOT) / 'results' / str(task_id) / 'manual_labels.csv'
 
 
+def _manual_text_label_manifest_path(task_id):
+    return Path(settings.MEDIA_ROOT) / 'results' / str(task_id) / 'manual_text_labels.csv'
+
+
 def _merge_manual_labels_for_task(task):
     """将原始标注文件与人工补标文件合并，人工补标优先。"""
     if not task.label_file or not Path(task.label_file.path).exists():
@@ -765,6 +843,33 @@ def _upsert_manual_label_record(task, image_name, label):
         writer.writerow(['filename', 'class'])
         for filename, existing_label in sorted(records.items()):
             writer.writerow([filename, existing_label])
+
+    return manifest_path
+
+
+def _upsert_manual_text_label_record(task, content, label):
+    manifest_path = _manual_text_label_manifest_path(task.id)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    records = {}
+    if manifest_path.exists():
+        with open(manifest_path, 'r', encoding='utf-8', newline='') as source_file:
+            reader = csv.DictReader(source_file)
+            for row in reader:
+                text = (row.get('text') or '').strip()
+                existing_label = (row.get('label') or '').strip()
+                if text:
+                    records[text] = existing_label
+
+    text = (content or '').strip()
+    if text:
+        records[text] = label
+
+    with open(manifest_path, 'w', encoding='utf-8', newline='') as target_file:
+        writer = csv.writer(target_file)
+        writer.writerow(['text', 'label'])
+        for text, existing_label in sorted(records.items()):
+            writer.writerow([text, existing_label])
 
     return manifest_path
 
@@ -939,12 +1044,25 @@ def manual_annotation(request, task_id):
     """主动学习人工标注界面。"""
     task = get_object_or_404(Task, id=task_id, user=request.user)
 
-    if task.task_type not in ('image-classification', 'text-classification'):
+    if task.task_type not in ('image-classification', 'text-classification', 'object-detection'):
         return JsonResponse({'status': 'error', 'message': '当前页面仅支持图像分类或文本分类任务'}, status=400)
 
     config = TASK_CONFIG[task.task_type]
     result_model = config['result_model']
     relation_field = config['relation_field']
+
+    stats = _get_label_verification_stats(task, result_model, relation_field)
+    total_count = result_model.objects.filter(**{relation_field: task}).count()
+    total_verifiable = stats.get('total_verifiable_count', total_count)
+    verified = stats.get('verified_count', 0)
+    verification_progress = round((verified / total_verifiable) * 100, 1) if total_verifiable > 0 else 0
+
+    task.total_count = total_count
+    task.total_verifiable_count = total_verifiable
+    task.verified_count = verified
+    task.unverified_count = stats.get('unverified_count', 0)
+    task.manual_annotated_count = stats.get('manual_annotated_count', stats.get('total_labeled_count', 0))
+    task.verification_progress = verification_progress
 
     # 统一口径：未标注（未校验）计数需排除已被人工标注（confidence=-1）的样本
     unlabeled_count = result_model.objects.filter(**{relation_field: task}, status='unverified').exclude(confidence=-1).count()
@@ -954,9 +1072,15 @@ def manual_annotation(request, task_id):
         'task_view_mode': 'manual',
         'task_page_title': '主动学习标注',
         'unlabeled_count': unlabeled_count,
+        'labels_json': json.dumps(list(task.label_list or [])),
     })
 
-    template_name = 'platform/tasks/unlabeled-detail_text_h.html' if task.task_type == 'text-classification' else 'platform/tasks/manual_annotation_h.html'
+    if task.task_type == 'text-classification':
+        template_name = 'platform/tasks/unlabeled-detail_text_h.html'
+    elif task.task_type == 'object-detection':
+        template_name = 'platform/tasks/detection_detail_h.html'
+    else:
+        template_name = 'platform/tasks/manual_annotation_h.html'
     return render(request, template_name, context)
 
 
@@ -969,12 +1093,25 @@ def unlabeled_detail(request, task_id):
     if task.task_type == 'text-classification':
         return redirect('task_detail', task_id=task_id)
 
-    if task.task_type not in ('image-classification',):
-        return JsonResponse({'status': 'error', 'message': '当前页面仅支持图像分类任务'}, status=400)
+    if task.task_type not in ('image-classification', 'object-detection'):
+        return JsonResponse({'status': 'error', 'message': '当前页面仅支持图像分类或目标检测任务'}, status=400)
 
     config = TASK_CONFIG[task.task_type]
     result_model = config['result_model']
     relation_field = config['relation_field']
+
+    stats = _get_label_verification_stats(task, result_model, relation_field)
+    total_count = result_model.objects.filter(**{relation_field: task}).count()
+    total_verifiable = stats.get('total_verifiable_count', total_count)
+    verified = stats.get('verified_count', 0)
+    verification_progress = round((verified / total_verifiable) * 100, 1) if total_verifiable > 0 else 0
+
+    task.total_count = total_count
+    task.total_verifiable_count = total_verifiable
+    task.verified_count = verified
+    task.unverified_count = stats.get('unverified_count', 0)
+    task.manual_annotated_count = stats.get('manual_annotated_count', stats.get('total_labeled_count', 0))
+    task.verification_progress = verification_progress
 
     # 统一口径：未标注（未校验）计数需排除已被人工标注（confidence=-1）的样本
     unlabeled_count = result_model.objects.filter(**{relation_field: task}, status='unverified').exclude(confidence=-1).count()
@@ -984,9 +1121,10 @@ def unlabeled_detail(request, task_id):
         'task_view_mode': 'unlabeled',
         'task_page_title': '未标注样本',
         'unlabeled_count': unlabeled_count,
+        'labels_json': json.dumps(list(task.label_list or [])),
     })
 
-    template_name = 'platform/tasks/unlabeled_detail_h.html'
+    template_name = 'platform/tasks/detection_detail_h.html' if task.task_type == 'object-detection' else 'platform/tasks/unlabeled_detail_h.html'
     return render(request, template_name, context)
 
 
@@ -1074,7 +1212,11 @@ def task_detail(request, task_id):
     items = result_model.objects.filter(**{relation_field: task})
 
     context = TaskService.get_common_context(task)
-    if task.task_type in ('image-classification', 'text-classification') and task.labeling_type == 'pre-trained':
+    if (
+        task.task_type in ('image-classification', 'text-classification')
+        and task.labeling_type == 'pre-trained'
+        and task.label_file
+    ):
         context['task_completion_redirect_url'] = reverse('manual_annotation', args=[task.id])
     context.update({
         'items': items,
@@ -1137,7 +1279,7 @@ def save_manual_annotation(request, task_id):
     """保存主动学习界面的人工标注结果。"""
     task = get_object_or_404(Task, id=task_id, user=request.user)
 
-    if task.task_type not in ('image-classification', 'text-classification'):
+    if task.task_type not in ('image-classification', 'text-classification', 'object-detection'):
         return JsonResponse({'status': 'error', 'message': '当前页面仅支持图像分类或文本分类任务'}, status=400)
 
     item_id = request.POST.get('item_id')
@@ -1156,6 +1298,8 @@ def save_manual_annotation(request, task_id):
 
         if task.task_type == 'image-classification':
             _upsert_manual_label_record(task, item.image_name, label)
+        elif task.task_type == 'text-classification':
+            _upsert_manual_text_label_record(task, item.content, label)
 
         return JsonResponse({
             'status': 'success',
@@ -1168,13 +1312,226 @@ def save_manual_annotation(request, task_id):
         return JsonResponse({'status': 'error', 'message': f'服务器内部错误: {str(e)}'}, status=500)
 
 
+
+@login_required
+@require_POST
+def save_detection_annotations(request, task_id):
+    """保存目标检测界面的标注（JSON 格式的 bbox 列表）。"""
+    task = get_object_or_404(Task, id=task_id, user=request.user)
+
+    if task.task_type not in ('object-detection', 'image-classification'):
+        return JsonResponse({'status': 'error', 'message': '当前页面仅支持目标检测或图像相关任务'}, status=400)
+
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return JsonResponse({'status': 'error', 'message': '无效的请求体，需为 JSON'}, status=400)
+
+    item_id = payload.get('item_id')
+    annotations = payload.get('annotations', [])
+    sample_mode = payload.get('mode') or 'pre_annotation_check'
+
+    if not item_id:
+        return JsonResponse({'status': 'error', 'message': '缺少 item_id'}, status=400)
+
+    try:
+        model = TASK_CONFIG[task.task_type]['result_model']
+        item = model.objects.get(id=item_id, task=task)
+
+        # annotations 期望为 [{x,y,w,h,label}, ...]，来自前端的为左上角相对坐标 (0..1)
+        # 将其转换为中心坐标形式 (xc,yc,w,h)，与训练脚本中使用的 YOLO 格式保持一致
+        normalized_annotations = []
+
+        def _clamp01(value):
+            return max(0.0, min(1.0, float(value)))
+
+        def _clean_points(points):
+            cleaned = []
+            for point in points or []:
+                if isinstance(point, dict):
+                    cleaned.append([_clamp01(point.get('x', 0)), _clamp01(point.get('y', 0))])
+                elif isinstance(point, (list, tuple)) and len(point) >= 2:
+                    cleaned.append([_clamp01(point[0]), _clamp01(point[1])])
+            return cleaned
+
+        try:
+            for a in annotations:
+                shape_type = (a.get('shape_type') or 'rectangle').strip() or 'rectangle'
+                label = a.get('label', '') or ''
+                source = a.get('source') or 'manual'
+                decision = a.get('decision') or a.get('annotation_status') or ('pending' if source == 'model' else 'manual')
+                confidence = a.get('confidence', None)
+
+                if shape_type != 'rectangle':
+                    points = _clean_points(a.get('points'))
+                    min_points = {'point': 1, 'line': 2, 'polygon': 3}.get(shape_type, 1)
+                    if len(points) < min_points:
+                        continue
+                    anno = {
+                        'label': label,
+                        'shape_type': shape_type,
+                        'source': source,
+                        'decision': decision,
+                        'sample_mode': sample_mode,
+                        'points': points,
+                    }
+                    if confidence not in (None, ''):
+                        anno['confidence'] = confidence
+                    normalized_annotations.append(anno)
+                    continue
+
+                x = float(a.get('x', 0))
+                y = float(a.get('y', 0))
+                w = float(a.get('w', 0))
+                h = float(a.get('h', 0))
+                if w <= 0 or h <= 0:
+                    continue
+                xc = x + w / 2.0
+                yc = y + h / 2.0
+                xmin = _clamp01(x)
+                ymin = _clamp01(y)
+                xmax = _clamp01(x + w)
+                ymax = _clamp01(y + h)
+                anno = {
+                    'label': label,
+                    'shape_type': 'rectangle',
+                    'source': source,
+                    'decision': decision,
+                    'sample_mode': sample_mode,
+                    'x': _clamp01(xc),
+                    'y': _clamp01(yc),
+                    'w': _clamp01(w),
+                    'h': _clamp01(h),
+                    'points': [[xmin, ymin], [xmax, ymax]],
+                }
+                if confidence not in (None, ''):
+                    anno['confidence'] = confidence
+                normalized_annotations.append(anno)
+        except Exception:
+            # 如果转换出错，回退保存原始数据以避免丢失
+            normalized_annotations = annotations
+
+        item.annotations = normalized_annotations
+        has_pending = any(
+            (a.get('source') == 'model' and (a.get('decision') or 'pending') == 'pending')
+            for a in normalized_annotations
+        )
+        item.status = 'unverified' if has_pending else 'verified'
+        item.confidence = -1.0
+        item.save(update_fields=['annotations', 'status', 'confidence'])
+
+        return JsonResponse({'status': 'success', 'message': '标注已保存'})
+    except model.DoesNotExist:
+        return JsonResponse({'status': 'error', 'message': '记录不存在'}, status=404)
+    except Exception as e:
+        logger.error(f"保存检测标注失败 (task_id: {task_id}, item_id: {item_id}): {e}", exc_info=True)
+        return JsonResponse({'status': 'error', 'message': f'服务器内部错误: {str(e)}'}, status=500)
+
+
+@login_required
+def export_detection_labelme(request, task_id):
+    """导出任务的目标检测标注为 Labelme JSON（每张图片一个 json），打包为 zip 下载。"""
+    task = get_object_or_404(Task, id=task_id, user=request.user)
+
+    ImageResultModel = apps.get_model('data_management', 'ImageResult')
+    items = ImageResultModel.objects.filter(task=task).all()
+
+    mem = io.BytesIO()
+    with zipfile.ZipFile(mem, mode='w', compression=zipfile.ZIP_DEFLATED) as zf:
+        for it in items:
+            anns = it.annotations or []
+            if not anns:
+                continue
+
+            # 读取图片以获取宽高
+            try:
+                img_path = it.image_path
+                if hasattr(img_path, 'path'):
+                    img_file = img_path.path
+                else:
+                    img_file = str(img_path)
+                with Image.open(img_file) as im:
+                    W, H = im.size
+            except Exception:
+                # 无法读取图片尺寸则跳过该条目
+                continue
+
+            shapes = []
+            for a in anns:
+                try:
+                    # anns 存储为中心坐标 (xc,yc,w,h)
+                    shape_type = a.get('shape_type') or 'rectangle'
+                    label = a.get('label', '') or ''
+                    source = a.get('source') or 'manual'
+                    decision = a.get('decision') or 'manual'
+
+                    if shape_type != 'rectangle' and a.get('points'):
+                        points = [
+                            [float(point[0]) * W, float(point[1]) * H]
+                            for point in a.get('points', [])
+                            if isinstance(point, (list, tuple)) and len(point) >= 2
+                        ]
+                        min_points = {'point': 1, 'line': 2, 'polygon': 3}.get(shape_type, 1)
+                        if len(points) < min_points:
+                            continue
+                    else:
+                        xc = float(a.get('x', 0))
+                        yc = float(a.get('y', 0))
+                        w = float(a.get('w', 0))
+                        h = float(a.get('h', 0))
+                        if w <= 0 or h <= 0:
+                            continue
+
+                        xmin = (xc - w / 2.0) * W
+                        ymin = (yc - h / 2.0) * H
+                        xmax = (xc + w / 2.0) * W
+                        ymax = (yc + h / 2.0) * H
+                        points = [[xmin, ymin], [xmax, ymin], [xmax, ymax], [xmin, ymax]]
+                        shape_type = 'polygon'
+
+                    shapes.append({
+                        'label': label,
+                        'points': points,
+                        'group_id': None,
+                        'shape_type': shape_type,
+                        'flags': {
+                            'source': source,
+                            'decision': decision,
+                            'sample_mode': a.get('sample_mode'),
+                            'confidence': a.get('confidence')
+                        }
+                    })
+                except Exception:
+                    continue
+
+            if not shapes:
+                continue
+
+            lm = {
+                'version': '5.0.1',
+                'flags': {},
+                'shapes': shapes,
+                'imagePath': it.image_name,
+                'imageData': None,
+                'imageHeight': H,
+                'imageWidth': W,
+            }
+
+            json_bytes = json.dumps(lm, ensure_ascii=False, indent=2).encode('utf-8')
+            json_name = f"{Path(it.image_name).stem}.json"
+            zf.writestr(json_name, json_bytes)
+
+    mem.seek(0)
+    return FileResponse(mem, as_attachment=True, filename=f"task_{task_id}_labelme.zip")
+
+
 @login_required
 @require_POST
 def add_unlabeled_to_labeled(request, task_id):
     """将未标注样本加入已标注界面（使用预测标签或用户修正标签）。"""
     task = get_object_or_404(Task, id=task_id, user=request.user)
 
-    if task.task_type not in ('image-classification', 'text-classification'):
+    if task.task_type not in ('image-classification', 'text-classification', 'object-detection'):
         return JsonResponse({'status': 'error', 'message': '当前页面仅支持图像分类或文本分类任务'}, status=400)
 
     item_id = request.POST.get('item_id')
@@ -1200,6 +1557,8 @@ def add_unlabeled_to_labeled(request, task_id):
 
         if task.task_type == 'image-classification':
             _upsert_manual_label_record(task, item.image_name, label)
+        elif task.task_type == 'text-classification':
+            _upsert_manual_text_label_record(task, item.content, label)
 
         return JsonResponse({'status': 'success', 'message': '已加入已标注界面'})
     except model.DoesNotExist:
@@ -1215,7 +1574,7 @@ def rerun_semi_supervised(request, task_id):
     """在人工标注后重新调用半监督流程。"""
     task = get_object_or_404(Task, id=task_id, user=request.user)
 
-    if task.task_type not in ('image-classification', 'text-classification'):
+    if task.task_type not in ('image-classification', 'text-classification', 'object-detection'):
         return JsonResponse({'status': 'error', 'message': '当前页面仅支持图像分类或文本分类任务'}, status=400)
 
     try:
@@ -1231,6 +1590,7 @@ def rerun_semi_supervised(request, task_id):
         task.error_log = ''
         task.save(update_fields=['status', 'progress', 'error_log'])
 
+        process_annotation_task, _ = _get_task_runners()
         celery_task = process_annotation_task.apply_async(
             args=[task.id],
             task_id=f'manual_retrain_{task.id}_{uuid.uuid4().hex[:6]}'
@@ -1470,20 +1830,27 @@ def task_data(request, task_id):
 
     queryset = result_model.objects.filter(**{relation_field: task})
     uncertainty_scores = {}
-    if task.task_type == 'image-classification':
+    if task.task_type in ('image-classification', 'object-detection'):
         uncertainty_scores = _load_image_uncertainty_scores(task)
     elif task.task_type == 'text-classification':
         uncertainty_scores = _load_text_uncertainty_scores(task)
 
-    if task.task_type == 'text-classification' and not task.label_file and not predicted_only:
-        return JsonResponse({
-            'results': [],
-            'page': 1,
-            'total_pages': 1,
-            'total_count': 0,
-        })
+    if task.task_type == 'image-classification':
+        manual_label_path = _manual_label_manifest_path(task.id)
+        has_uploaded_label_file = bool(task.label_file and Path(task.label_file.path).exists())
+        has_manual_image_labels = manual_label_path.exists() or queryset.filter(confidence=-1).exists()
+        if not has_uploaded_label_file and not has_manual_image_labels and (labeled_only or predicted_only):
+            return JsonResponse({
+                'results': [],
+                'page': 1,
+                'total_pages': 1,
+                'total_count': 0,
+            })
 
-    if task.task_type == 'text-classification' and not task.label_file and not predicted_only:
+    has_manual_text_labels = _manual_text_label_manifest_path(task.id).exists() or (
+        task.task_type == 'text-classification' and queryset.filter(confidence=-1).exists()
+    )
+    if task.task_type == 'text-classification' and not task.label_file and not has_manual_text_labels and not predicted_only:
         return JsonResponse({
             'results': [],
             'page': 1,
@@ -1525,6 +1892,12 @@ def task_data(request, task_id):
     if statuses_cn:
         current_status_q_objects = []
         for status_cn in statuses_cn:
+            if status_cn == 'manual':
+                current_status_q_objects.append(Q(confidence=-1))
+                continue
+            if status_cn in ('verified', 'unverified'):
+                current_status_q_objects.append(Q(status=status_cn))
+                continue
             if status_cn == '已标注':
                 # '已标注' 对应 confidence = -1
                 current_status_q_objects.append(Q(confidence=-1))
@@ -1550,11 +1923,15 @@ def task_data(request, task_id):
     # 应用排序条件
     if sort:
         column, order = sort.split(':')
-        if column in ('uncertainty', 'entropy') and task.task_type in ('image-classification', 'text-classification'):
+        if column in ('uncertainty', 'entropy') and task.task_type in ('image-classification', 'text-classification', 'object-detection'):
             queryset_list = list(queryset)
 
             def _uncertainty_sort_key(item):
-                score_key = getattr(item, 'image_name', '') if task.task_type == 'image-classification' else getattr(item, 'text_id', '')
+                score_key = (
+                    getattr(item, 'text_id', '')
+                    if task.task_type == 'text-classification'
+                    else getattr(item, 'image_name', '')
+                )
                 base_score = uncertainty_scores.get(score_key, None)
                 if base_score is None:
                     try:
@@ -1620,7 +1997,9 @@ def task_data(request, task_id):
 
         # 格式化置信度，人工标注的显示为 "-1.000"
         display_confidence = f"{float(item.confidence):.3f}" if item.confidence is not None and item.confidence != -1 else "-1.000"
-        if task.task_type == 'text-classification' and not task.label_file:
+        if task.task_type == 'image-classification' and not task.label_file and not has_uploaded_label_file and not has_manual_image_labels and not is_manual_annotation:
+            display_confidence = ''
+        if task.task_type == 'text-classification' and not task.label_file and not has_manual_text_labels:
             display_confidence = ''
 
         result = {
@@ -1628,13 +2007,14 @@ def task_data(request, task_id):
             'label': item.label,
             'confidence': display_confidence,
             'status': display_status,
+            'raw_status': item.status,
             'sequence_number': item.sequence_number,
             'created_at': item.created_at.strftime('%Y-%m-%d %H:%M:%S') if item.created_at else None
         }
         if isinstance(item, TextResult):
             result['content'] = item.content
             # 只有在非人工标注的样本中，才在无标签任务中清空标签
-            if task.task_type == 'text-classification' and not task.label_file and not is_manual_annotation:
+            if task.task_type == 'text-classification' and not task.label_file and not has_manual_text_labels and not is_manual_annotation:
                 result['label'] = ''
                 result['confidence'] = ''
             text_uncertainty = uncertainty_scores.get(item.text_id)
@@ -1648,6 +2028,8 @@ def task_data(request, task_id):
         elif isinstance(item, ImageResult):
             result['relative_image_url'] = item.relative_image_url
             result['image_name'] = item.image_name
+            # 包含目标检测标注数据（如果存在）
+            result['annotations'] = item.annotations or []
             result['is_manual_annotation'] = is_manual_annotation
             uncertainty_score = uncertainty_scores.get(item.image_name)
             if uncertainty_score is None:

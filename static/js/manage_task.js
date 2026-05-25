@@ -26,6 +26,7 @@ document.addEventListener("DOMContentLoaded", () => {
     taskTypes: {
       "image-classification": "图像分类",
       "text-classification": "文本分类",
+      "object-detection": "目标检测",
     },
 
     filters: {

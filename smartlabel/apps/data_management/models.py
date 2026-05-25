@@ -16,6 +16,7 @@ class Task(models.Model):
     TYPE_CHOICES = (
         ('image-classification', '图像分类'),
         ('text-classification', '文本分类'),
+        ('object-detection', '目标检测'),
     )
     LABELING_CHOICES = (
         ('pre-trained', '预训练'),
@@ -84,6 +85,7 @@ class ImageResult(models.Model):
     image_path = models.CharField(max_length=512)
     label = models.CharField(max_length=255)
     confidence = models.FloatField()
+    annotations = JSONField(default=list, blank=True, null=True, verbose_name='目标检测标注')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     status = models.CharField(max_length=20, choices=ITEM_STATUS_CHOICES, default="unverified")

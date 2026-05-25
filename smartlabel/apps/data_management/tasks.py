@@ -2,6 +2,7 @@ import csv
 import glob
 import json
 import logging
+import math
 import os
 import pandas as pd
 import psutil
@@ -21,10 +22,28 @@ from django.db import transaction
 from django.db import models
 from pathlib import Path
 import torch
+from smartlabel.apps.algorithm.object_detection.active_learning import detection_uncertainty
 from .models import Task
 
 MIN_UPDATE_INTERVAL = 0.5
 logger = logging.getLogger(__name__)
+DETECTION_PREDICT_CONF_THRES = 0.25
+DETECTION_PREDICT_IOU_THRES = 0.45
+DETECTION_PREDICT_MAX_DET = 100
+DETECTION_MAX_BOXES_PER_IMAGE = 100
+DETECTION_PRETRAINED_WEIGHT = Path(os.environ.get(
+    'SMARTLABEL_EFFICIENTTEACHER_WEIGHTS',
+    str(Path(settings.BASE_DIR) / 'models' / 'efficient-yolov5l-obj365.pt'),
+))
+DETECTION_LABEL_ALIASES = {
+    '船': 'ship',
+    '船舶': 'ship',
+    '轮船': 'ship',
+    '车': 'car',
+    '汽车': 'car',
+    '车辆': 'car',
+    '飞机': 'airplane',
+}
 DEFAULT_TEXT_CLASSIFICATION_BERT_MODEL = Path(os.environ.get(
     'SMARTLABEL_TEXT_CLASSIFICATION_BERT_MODEL',
     str(Path(settings.BASE_DIR) / 'models' / 'chinese-roberta-wwm-ext'),
@@ -493,12 +512,12 @@ def _merge_manual_labels_if_needed(task):
     return merged_label_path
 
 
+def _manual_text_label_path(task):
+    return Path(settings.MEDIA_ROOT) / 'results' / str(task.id) / 'manual_text_labels.csv'
+
+
 @shared_task(
     bind=True,
-    autoretry_for=(Exception,),
-    max_retries=2,
-    retry_backoff=120,
-    retry_jitter=True,
     time_limit=7200,
     soft_time_limit=3600
 )
@@ -564,17 +583,13 @@ def process_pretrained_task(self, task_id, *args, **kwargs):
                 logger.error(f"任务失败原因: {str(e)}")
         except Exception as update_error:
             logger.error(f"更新任务状态失败: {str(update_error)}")
-        
-        # 重试，最多重试3次（针对非 Task.DoesNotExist 错误）
-        raise self.retry(exc=e, countdown=120)
+
+        # 训练错误通常是确定性的，不再自动重试，避免 worker 反复重复运行同一任务。
+        raise Ignore()
 
 
 @shared_task(
     bind=True,
-    autoretry_for=(Exception,),
-    max_retries=2,
-    retry_backoff=120,
-    retry_jitter=True,
     time_limit=7200,
     soft_time_limit=3600
 )
@@ -614,10 +629,74 @@ def process_annotation_task(self, task_id):
         if task.task_type == 'image-classification':
             # 1. 校验数据文件内容
             valid_image_extensions = {'.jpg', '.jpeg', '.png'}
-            if not any(f.suffix.lower() in valid_image_extensions for f in extract_dir.rglob('*')):
+            image_files = sorted(
+                (f for f in extract_dir.rglob('*') if f.suffix.lower() in valid_image_extensions),
+                key=lambda p: str(p).lower()
+            )
+            if not image_files:
                 raise ValueError(f"数据压缩包中未找到任何支持的图像文件 ({', '.join(valid_image_extensions)})。")
 
             # 2. 合并原始标注与人工补标；若没有原始标注，则使用人工补标文件作为训练输入
+            manual_label_path = Path(settings.MEDIA_ROOT) / 'results' / str(task.id) / 'manual_labels.csv'
+            has_uploaded_label_file = bool(task.label_file and Path(task.label_file.path).exists())
+            if not manual_label_path.exists():
+                ImageResult = apps.get_model('data_management', 'ImageResult')
+                manual_items = ImageResult.objects.filter(task=task, confidence=-1).exclude(label__exact='')
+                if manual_items.exists():
+                    manual_label_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(manual_label_path, 'w', newline='', encoding='utf-8') as f:
+                        writer = csv.writer(f)
+                        writer.writerow(['filename', 'class'])
+                        for item in manual_items:
+                            if item.image_name and item.label:
+                                writer.writerow([item.image_name, item.label])
+            has_manual_label_file = manual_label_path.exists()
+            if not has_uploaded_label_file and not has_manual_label_file:
+                def _cold_start_image_uncertainty(image_path):
+                    try:
+                        from PIL import Image
+                        with Image.open(image_path) as img:
+                            gray = img.convert('L').resize((64, 64))
+                            histogram = gray.histogram()
+                            total = float(sum(histogram)) or 1.0
+                            entropy = -sum(
+                                (count / total) * math.log2(count / total)
+                                for count in histogram
+                                if count
+                            )
+                            return round(max(0.0, min(1.0, entropy / 8.0)), 6)
+                    except Exception:
+                        try:
+                            return round(max(0.0, min(1.0, image_path.stat().st_size / (1024 * 1024))), 6)
+                        except Exception:
+                            return 0.0
+
+                result_rows = []
+                for image_path in image_files:
+                    result_rows.append({
+                        'image_name': image_path.name,
+                        'image_path': str(image_path.resolve()),
+                        'label': '',
+                        'confidence': '',
+                        'uncertainty_score': _cold_start_image_uncertainty(image_path),
+                    })
+
+                with open(result_file_path, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.DictWriter(
+                        f,
+                        fieldnames=['image_name', 'image_path', 'label', 'confidence', 'uncertainty_score']
+                    )
+                    writer.writeheader()
+                    writer.writerows(result_rows)
+
+                _update_task_progress(task, 30, self)
+                save_results_to_database(result_file_path, task, 'image-classification', update_progress)
+                task.progress = 100
+                task.status = 'completed'
+                task.save()
+                logger.info(f"鍗婄洃鐫ｄ换鍔?{task_id} 澶勭悊瀹屾垚")
+                return {"status": "success", "task_id": task_id}
+
             label_file_path = _merge_manual_labels_if_needed(task)
             try:
                 with open(label_file_path, 'r', encoding='utf-8') as f:
@@ -698,8 +777,22 @@ def process_annotation_task(self, task_id):
                 raise FileNotFoundError(f"数据压缩包解压后，在目录 {extract_dir} 中未找到任何 .csv 文件。")
 
             TEXT_COLUMN_KEYWORDS = ['text', 'content', 'body', 'sentence', 'article', 'description', 'message']
+            manual_text_label_path = _manual_text_label_path(task)
+            if not manual_text_label_path.exists():
+                TextResult = apps.get_model('data_management', 'TextResult')
+                manual_items = TextResult.objects.filter(task=task, confidence=-1).exclude(label__exact='')
+                if manual_items.exists():
+                    manual_text_label_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(manual_text_label_path, 'w', newline='', encoding='utf-8') as f:
+                        writer = csv.writer(f)
+                        writer.writerow(['text', 'label'])
+                        for item in manual_items:
+                            if item.content and item.label:
+                                writer.writerow([item.content, item.label])
+            has_text_label_file = bool(task.label_file and Path(task.label_file.path).exists())
+            has_manual_text_label_file = manual_text_label_path.exists()
 
-            if not task.label_file or not Path(task.label_file.path).exists():
+            if not has_text_label_file and not has_manual_text_label_file:
                 # 无标签文本任务：只输出不确定性，预测标签和置信度保持空。
                 texts = []
                 for unlabeled_file in unlabeled_files:
@@ -741,7 +834,7 @@ def process_annotation_task(self, task_id):
                 save_results_to_database(result_file_path, task, 'text-classification', update_progress)
 
             else:
-                label_file_path = Path(task.label_file.path)
+                label_file_path = Path(task.label_file.path) if has_text_label_file else manual_text_label_path
                 try:
                     with open(label_file_path, 'r', encoding='utf-8') as f:
                         header = f.readline().strip().lower()
@@ -846,6 +939,640 @@ def process_annotation_task(self, task_id):
                 _update_task_progress(task, 85, self)
                 save_results_to_database(result_file_path, task, 'text-classification', update_progress)
 
+        # ==================== 目标检测逻辑 ====================
+        elif task.task_type == 'object-detection':
+            # 验证数据目录
+            valid_image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'}
+            image_files = [p for p in extract_dir.rglob('*') if p.suffix.lower() in valid_image_extensions]
+            if not image_files:
+                raise FileNotFoundError(f"数据压缩包中未找到任何支持的图像文件 ({', '.join(valid_image_extensions)})。")
+
+            _update_task_progress(task, 10, self)
+
+            # 从数据库中读取人工标注（前端保存到 ImageResult.annotations）作为有标签样本
+            ImageResult = apps.get_model('data_management', 'ImageResult')
+            labeled_map = {}
+            external_label_loaded = False
+
+            image_by_name = {p.name: p for p in image_files}
+
+            def _canonical_detection_label(label):
+                label_text = str(label or '').strip()
+                if not label_text:
+                    return 'obj'
+                return DETECTION_LABEL_ALIASES.get(label_text, label_text)
+
+            def _append_coco_annotations(coco_data):
+                categories = {
+                    int(c.get('id')): _canonical_detection_label(c.get('name') or 'obj')
+                    for c in coco_data.get('categories', [])
+                    if c.get('id') is not None
+                }
+                images_meta = {
+                    int(img.get('id')): img
+                    for img in coco_data.get('images', [])
+                    if img.get('id') is not None
+                }
+
+                for ann in coco_data.get('annotations', []):
+                    image_id = ann.get('image_id')
+                    bbox = ann.get('bbox') or []
+                    category_id = ann.get('category_id')
+                    if image_id is None or len(bbox) < 4:
+                        continue
+
+                    image_meta = images_meta.get(int(image_id))
+                    if not image_meta:
+                        continue
+
+                    file_name = Path(str(image_meta.get('file_name', ''))).name
+                    if not file_name:
+                        continue
+
+                    img_path = image_by_name.get(file_name)
+                    if not img_path:
+                        continue
+
+                    img_w = float(image_meta.get('width') or 0)
+                    img_h = float(image_meta.get('height') or 0)
+                    if img_w <= 0 or img_h <= 0:
+                        continue
+
+                    x, y, w, h = [float(v) for v in bbox[:4]]
+                    if w <= 0 or h <= 0:
+                        continue
+
+                    xc = (x + w / 2.0) / img_w
+                    yc = (y + h / 2.0) / img_h
+                    wn = w / img_w
+                    hn = h / img_h
+
+                    lbl = categories.get(int(category_id), 'obj') if category_id is not None else 'obj'
+                    labeled_map.setdefault(img_path.name, []).append({
+                        'label': lbl,
+                        'x': max(0.0, min(1.0, xc)),
+                        'y': max(0.0, min(1.0, yc)),
+                        'w': max(0.0, min(1.0, wn)),
+                        'h': max(0.0, min(1.0, hn)),
+                    })
+
+            # 若上传了标注文件（可选），优先尝试解析 JSON(COCO) 或 CSV
+            if task.label_file and Path(task.label_file.path).exists():
+                label_file_path = Path(task.label_file.path)
+                try:
+                    if label_file_path.suffix.lower() == '.json':
+                        with open(label_file_path, 'r', encoding='utf-8') as jf:
+                            label_json = json.load(jf)
+                        if isinstance(label_json, dict) and 'images' in label_json and 'annotations' in label_json:
+                            before_label_count = len(labeled_map)
+                            _append_coco_annotations(label_json)
+                            external_label_loaded = external_label_loaded or len(labeled_map) > before_label_count
+                            logger.info("任务 %s 从上传标注 JSON %s 解析到 %s 张有标注图片", task_id, label_file_path.name, len(labeled_map))
+                    elif label_file_path.suffix.lower() == '.csv':
+                        with open(label_file_path, 'r', encoding='utf-8', newline='') as cf:
+                            reader = csv.DictReader(cf)
+                            for row in reader:
+                                fname = (row.get('filename') or row.get('image') or row.get('image_name') or '').strip()
+                                if not fname:
+                                    continue
+                                img_name = Path(fname).name
+                                img_path = image_by_name.get(img_name)
+                                if not img_path:
+                                    continue
+                                try:
+                                    xmin = float(row.get('xmin', ''))
+                                    ymin = float(row.get('ymin', ''))
+                                    xmax = float(row.get('xmax', ''))
+                                    ymax = float(row.get('ymax', ''))
+                                except Exception:
+                                    continue
+                                if xmax <= xmin or ymax <= ymin:
+                                    continue
+
+                                # 使用图片实际尺寸做归一化，避免依赖 CSV 附加宽高字段
+                                from PIL import Image
+                                with Image.open(img_path) as im:
+                                    iw, ih = im.size
+                                if iw <= 0 or ih <= 0:
+                                    continue
+                                x = (xmin + xmax) / 2.0 / iw
+                                y = (ymin + ymax) / 2.0 / ih
+                                w = (xmax - xmin) / iw
+                                h = (ymax - ymin) / ih
+                                lbl = _canonical_detection_label((row.get('class') or row.get('label') or 'obj').strip() or 'obj')
+
+                                labeled_map.setdefault(img_name, []).append({
+                                    'label': lbl,
+                                    'x': max(0.0, min(1.0, x)),
+                                    'y': max(0.0, min(1.0, y)),
+                                    'w': max(0.0, min(1.0, w)),
+                                    'h': max(0.0, min(1.0, h)),
+                                })
+                        external_label_loaded = True
+                        logger.info("任务 %s 从上传标注 CSV %s 解析到 %s 张有标注图片", task_id, label_file_path.name, len(labeled_map))
+                except Exception as e:
+                    logger.warning("任务 %s 解析上传标注文件失败: %s", task_id, e)
+
+            # 若数据库中暂无人工标注，尝试解析上传包中的 COCO 标注（annotations/instances*.json）。
+            if not external_label_loaded:
+                try:
+                    coco_candidates = sorted(
+                        list(Path(extract_dir).rglob('instances*.json'))
+                        + list(Path(extract_dir).rglob('annotations*.json'))
+                    )
+                    for coco_file in coco_candidates:
+                        with open(coco_file, 'r', encoding='utf-8') as cf:
+                            coco_data = json.load(cf)
+
+                        before_label_count = len(labeled_map)
+                        _append_coco_annotations(coco_data)
+                        external_label_loaded = external_label_loaded or len(labeled_map) > before_label_count
+
+                        if labeled_map:
+                            logger.info("任务 %s 从 COCO 标注文件 %s 解析到 %s 张有标注图片", task_id, coco_file, len(labeled_map))
+                            break
+                except Exception as e:
+                    logger.warning("任务 %s 解析 COCO 标注失败，将继续使用人工标注流程: %s", task_id, e)
+
+            db_manual_map = {}
+            for ir in ImageResult.objects.filter(task=task).all():
+                if not ir.annotations:
+                    continue
+                confirmed_annotations = []
+                for annotation in ir.annotations:
+                    if not isinstance(annotation, dict):
+                        continue
+                    source = annotation.get('source') or ''
+                    decision = annotation.get('decision') or annotation.get('annotation_status') or ''
+                    if ir.confidence == -1 or source == 'manual' or decision in ('accepted', 'manual'):
+                        confirmed_annotations.append(annotation)
+                if confirmed_annotations:
+                    db_manual_map[ir.image_name] = confirmed_annotations
+            labeled_map.update(db_manual_map)
+            if db_manual_map:
+                logger.info(
+                    "任务 %s 合并数据库人工确认标注 %s 张图片；训练标注总计 %s 张图片",
+                    task_id,
+                    len(db_manual_map),
+                    len(labeled_map),
+                )
+
+            def _annotation_to_yolo_box(annotation):
+                """将界面标注规范化为 YOLO 训练需要的中心点框。
+
+                目标检测训练只吃矩形框；界面允许画 polygon 时，取外接矩形作为训练框。
+                """
+                if not isinstance(annotation, dict):
+                    return None
+
+                source = annotation.get('source') or (
+                    'model' if annotation.get('confidence') not in (None, '') else 'manual'
+                )
+                decision = annotation.get('decision') or annotation.get('annotation_status') or (
+                    'pending' if source == 'model' else 'manual'
+                )
+                if source == 'model' and decision in ('pending', 'rejected'):
+                    return None
+                if decision == 'rejected':
+                    return None
+
+                label = _canonical_detection_label(annotation.get('label') or '')
+                shape_type = annotation.get('shape_type') or 'rectangle'
+
+                if shape_type == 'rectangle':
+                    points = annotation.get('points') or []
+                    if isinstance(points, list) and len(points) >= 2:
+                        try:
+                            xs = [max(0.0, min(1.0, float(p[0]))) for p in points if isinstance(p, (list, tuple)) and len(p) >= 2]
+                            ys = [max(0.0, min(1.0, float(p[1]))) for p in points if isinstance(p, (list, tuple)) and len(p) >= 2]
+                            if len(xs) >= 2 and len(ys) >= 2:
+                                min_x, max_x = min(xs), max(xs)
+                                min_y, max_y = min(ys), max(ys)
+                                w = max_x - min_x
+                                h = max_y - min_y
+                                if w > 0 and h > 0:
+                                    return {
+                                        'label': label,
+                                        'x': min_x + w / 2.0,
+                                        'y': min_y + h / 2.0,
+                                        'w': w,
+                                        'h': h,
+                                    }
+                        except Exception:
+                            pass
+
+                    try:
+                        x = float(annotation.get('x', 0))
+                        y = float(annotation.get('y', 0))
+                        w = float(annotation.get('w', 0))
+                        h = float(annotation.get('h', 0))
+                    except (TypeError, ValueError):
+                        return None
+                    if w <= 0 or h <= 0:
+                        return None
+                    return {
+                        'label': label,
+                        'x': max(0.0, min(1.0, x)),
+                        'y': max(0.0, min(1.0, y)),
+                        'w': max(0.0, min(1.0, w)),
+                        'h': max(0.0, min(1.0, h)),
+                    }
+
+                if shape_type == 'polygon':
+                    points = annotation.get('points') or []
+                    try:
+                        xs = [max(0.0, min(1.0, float(p[0]))) for p in points if isinstance(p, (list, tuple)) and len(p) >= 2]
+                        ys = [max(0.0, min(1.0, float(p[1]))) for p in points if isinstance(p, (list, tuple)) and len(p) >= 2]
+                    except (TypeError, ValueError):
+                        return None
+                    if len(xs) < 3 or len(ys) < 3:
+                        return None
+                    min_x, max_x = min(xs), max(xs)
+                    min_y, max_y = min(ys), max(ys)
+                    w = max_x - min_x
+                    h = max_y - min_y
+                    if w <= 0 or h <= 0:
+                        return None
+                    return {
+                        'label': label,
+                        'x': min_x + w / 2.0,
+                        'y': min_y + h / 2.0,
+                        'w': w,
+                        'h': h,
+                    }
+
+                return None
+
+            # 收集类别名称时只统计真正能进入训练的标注，避免“有 annotations 但无可训练框”的假阳性。
+            class_names = set()
+            usable_labeled_map = {}
+            for image_name, anns in labeled_map.items():
+                usable_boxes = []
+                for ann in anns:
+                    box = _annotation_to_yolo_box(ann)
+                    if not box:
+                        continue
+                    box['label'] = _canonical_detection_label(box.get('label'))
+                    if box.get('label'):
+                        class_names.add(box['label'])
+                    usable_boxes.append(box)
+                if usable_boxes:
+                    usable_labeled_map[image_name] = usable_boxes
+
+            labeled_map = usable_labeled_map
+
+            # 如果 Task 中预设了 label_list，优先使用
+            if task.label_list:
+                class_list = []
+                for label_name in task.label_list:
+                    canonical_label = _canonical_detection_label(label_name)
+                    if canonical_label not in class_list:
+                        class_list.append(canonical_label)
+            else:
+                class_list = sorted(list(class_names))
+
+            if not class_list:
+                class_list = ['obj']
+
+            class2id = {n: i for i, n in enumerate(class_list)}
+
+            def _label_path_for_image(img_path):
+                parts = list(img_path.parts)
+                if 'images' in parts:
+                    idx = parts.index('images')
+                    parts[idx] = 'labels'
+                    return Path(*parts).with_suffix('.txt')
+                return img_path.parent / 'labels' / f"{img_path.stem}.txt"
+
+            # 为每张图片生成 YOLO 格式的 label 文件（放在解压目录旁，跟图片同目录）
+            for img_path in image_files:
+                stem = img_path.stem
+                anns = labeled_map.get(img_path.name) or []
+                label_lines = []
+                for a in anns:
+                    try:
+                        x = float(a.get('x', 0))
+                        y = float(a.get('y', 0))
+                        w = float(a.get('w', 0))
+                        h = float(a.get('h', 0))
+                        if w <= 0 or h <= 0:
+                            continue
+                        lbl = a.get('label') or class_list[0]
+                        cid = class2id.get(lbl, 0)
+                        label_lines.append(f"{cid} {x:.6f} {y:.6f} {w:.6f} {h:.6f}")
+                    except Exception:
+                        continue
+
+                label_file = _label_path_for_image(img_path)
+                label_file.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    with open(label_file, 'w', encoding='utf-8') as lf:
+                        for ln in label_lines:
+                            lf.write(ln + '\n')
+                except Exception as e:
+                    logger.warning(f"无法写入标签文件 {label_file}: {e}")
+
+            _update_task_progress(task, 20, self)
+
+            # 生成 train/val/target 列表
+            labeled_images = [
+                p for p in image_files
+                if _label_path_for_image(p).exists() and _label_path_for_image(p).stat().st_size > 0
+            ]
+            unlabeled_images = [p for p in image_files if p not in labeled_images]
+
+            if not labeled_images:
+                raise ValueError("目标检测任务未检测到可用标注。请上传含 COCO/VOC/YOLO 标注的数据压缩包，或先在界面完成至少1张人工标注后再提交。")
+
+            # 简单划分 val（10% 的有标签样本）
+            if len(labeled_images) == 1:
+                train_images = labeled_images
+                val_images = labeled_images
+            else:
+                val_count = max(1, int(len(labeled_images) * 0.1))
+                if val_count >= len(labeled_images):
+                    val_count = len(labeled_images) - 1
+                val_images = labeled_images[:val_count]
+                train_images = labeled_images[val_count:]
+
+            # EfficientTeacher 某些流程会读取 target 列表，避免空文件触发上游 list index 错误。
+            if not unlabeled_images:
+                unlabeled_images = train_images
+
+            data_list_dir = Path(result_dir) / 'data_lists'
+            data_list_dir.mkdir(parents=True, exist_ok=True)
+
+            train_txt = data_list_dir / 'train.txt'
+            val_txt = data_list_dir / 'val.txt'
+            target_txt = data_list_dir / 'target.txt'
+
+            def write_list(path, lst, with_label=False):
+                with open(path, 'w', encoding='utf-8') as f:
+                    for p in lst:
+                        if with_label:
+                            f.write(f"{str(p.resolve())} {str(_label_path_for_image(p).resolve())}\n")
+                        else:
+                            f.write(str(p.resolve()) + '\n')
+
+            write_list(train_txt, train_images, with_label=True)
+            write_list(val_txt, val_images, with_label=True)
+            write_list(target_txt, unlabeled_images)
+
+            # EfficientTeacher 会优先读取 data list 同名的 .cache；旧缓存不会总是校验 hash，
+            # 重新人工标注后如果不清理，会继续使用旧标签并导致类别越界等训练错误。
+            for list_path in (train_txt, val_txt, target_txt):
+                cache_path = list_path.with_suffix('.cache')
+                if cache_path.exists():
+                    try:
+                        cache_path.unlink()
+                        logger.info("已删除旧数据集缓存: %s", cache_path)
+                    except Exception as e:
+                        logger.warning("删除旧数据集缓存失败 %s: %s", cache_path, e)
+
+            _update_task_progress(task, 30, self)
+
+            # 创建 EfficientTeacher 配置文件（基于官方 yolov5 模板，避免默认值触发 NotImplementedError）
+            cfg_name = f"task_{task_id}_effteacher"
+            cfg_path = Path(result_dir) / 'config.yaml'
+            cfg_lines = []
+            cfg_lines.append(f"project: '{result_dir}'")
+            cfg_lines.append(f"name: '{cfg_name}'")
+            cfg_lines.append("epochs: 5")
+            cfg_lines.append("adam: False")
+            pretrained_weight = str(DETECTION_PRETRAINED_WEIGHT) if DETECTION_PRETRAINED_WEIGHT.exists() else ''
+            cfg_lines.append(f"weights: '{pretrained_weight}'")
+            if pretrained_weight:
+                logger.info("目标检测训练使用预训练权重: %s", pretrained_weight)
+            else:
+                logger.warning(
+                    "未找到目标检测预训练权重 %s，将从零训练；少量数据下可能无法生成可靠预测框。",
+                    DETECTION_PRETRAINED_WEIGHT,
+                )
+            cfg_lines.append("prune_finetune: False")
+
+            cfg_lines.append("hyp:")
+            cfg_lines.append("  lr0: 0.01")
+            cfg_lines.append("  hsv_h: 0.015")
+            cfg_lines.append("  hsv_s: 0.7")
+            cfg_lines.append("  hsv_v: 0.4")
+            cfg_lines.append("  lrf: 0.01")
+
+            cfg_lines.append("Model:")
+            cfg_lines.append("  depth_multiple: 0.33")
+            cfg_lines.append("  width_multiple: 0.50")
+            cfg_lines.append("  Backbone:")
+            cfg_lines.append("    name: 'YoloV5'")
+            cfg_lines.append("    activation: 'SiLU'")
+            cfg_lines.append("  Neck:")
+            cfg_lines.append("    name: 'YoloV5'")
+            cfg_lines.append("    in_channels: [256, 512, 1024]")
+            cfg_lines.append("    out_channels: [256, 512, 1024]")
+            cfg_lines.append("    activation: 'SiLU'")
+            cfg_lines.append("  Head:")
+            cfg_lines.append("    name: 'YoloV5'")
+            cfg_lines.append("    activation: 'SiLU'")
+            cfg_lines.append("  anchors: [[10,13, 16,30, 33,23], [30,61, 62,45, 59,119], [116,90, 156,198, 373,326]]")
+
+            cfg_lines.append("Loss:")
+            cfg_lines.append("  type: 'ComputeLoss'")
+
+            cfg_lines.append("Dataset:")
+            cfg_lines.append(f"  train: {str(train_txt)}")
+            cfg_lines.append(f"  val: {str(val_txt)}")
+            cfg_lines.append(f"  target: {str(target_txt)}")
+            cfg_lines.append("  data_name: 'custom'")
+            cfg_lines.append(f"  nc: {len(class_list)}")
+            cfg_lines.append(f"  img_size: 640")
+            cfg_lines.append(f"  batch_size: 16")
+            # names 列表展开为行
+            cfg_lines.append("  names: [" + ", ".join([f'\'{n}\'' for n in class_list]) + "]")
+
+            with open(cfg_path, 'w', encoding='utf-8') as cf:
+                cf.write('\n'.join(cfg_lines))
+
+            _update_task_progress(task, 35, self)
+
+            # 调用 EfficientTeacher 的 train.py
+            efficient_train = Path(settings.BASE_DIR) / 'smartlabel' / 'apps' / 'algorithm' / 'efficientteacher-main' / 'train.py'
+            # 使用 conda 环境名 efficientteacher；如无请用户自行准备
+            cmd = [
+                'conda', 'run', '--no-capture-output', '-n', 'efficientteacher', 'python',
+                str(efficient_train), '--cfg', str(cfg_path)
+            ]
+
+            logger.info(f"执行目标检测训练命令: {' '.join(shlex.quote(s) for s in cmd)}")
+            _update_task_progress(task, 40, self)
+            run_subprocess_with_progress(cmd, task_id)
+
+            _update_task_progress(task, 75, self)
+
+            # 训练完成后，用 detect.py 在所有图片上做预测并收集结果
+            detect_py = Path(settings.BASE_DIR) / 'smartlabel' / 'apps' / 'algorithm' / 'efficientteacher-main' / 'detect.py'
+            # EfficientTeacher 会在同名目录已存在时自动追加编号，例如 task_1_effteacher2。
+            # 因此必须按最新训练目录寻找权重，不能只查固定目录。
+            weight_candidates = []
+            for run_dir in sorted(Path(result_dir).glob(f'{cfg_name}*'), key=lambda p: p.stat().st_mtime, reverse=True):
+                for candidate_name in ('best.pt', 'last.pt'):
+                    candidate = run_dir / 'weights' / candidate_name
+                    if candidate.exists():
+                        weight_candidates.append(candidate)
+            if not weight_candidates:
+                raise FileNotFoundError(f"目标检测训练已结束，但未找到输出权重: {Path(result_dir) / (cfg_name + '*') / 'weights'}")
+            weight_file = weight_candidates[0]
+            logger.info("目标检测推理使用权重: %s", weight_file)
+
+            detect_source = extract_dir / 'images' if (extract_dir / 'images').exists() else extract_dir
+            detect_cmd = [
+                'conda', 'run', '--no-capture-output', '-n', 'efficientteacher', 'python',
+                str(detect_py),
+                '--weights', str(weight_file),
+                '--source', str(detect_source),
+                '--imgsz', '640',
+                '--conf-thres', str(DETECTION_PREDICT_CONF_THRES),
+                '--iou-thres', str(DETECTION_PREDICT_IOU_THRES),
+                '--max-det', str(DETECTION_PREDICT_MAX_DET),
+                '--save-txt',
+                '--save-conf',
+                '--project', str(result_dir),
+                '--name', 'pred',
+                '--exist-ok',
+            ]
+            logger.info(
+                "object detection predict args: source=%s, conf_thres=%s, iou_thres=%s, max_det=%s",
+                detect_source,
+                DETECTION_PREDICT_CONF_THRES,
+                DETECTION_PREDICT_IOU_THRES,
+                DETECTION_PREDICT_MAX_DET,
+            )
+            pred_dir = Path(result_dir) / 'pred'
+            if pred_dir.exists():
+                import shutil
+                shutil.rmtree(pred_dir)
+            run_subprocess_with_progress(detect_cmd, task_id)
+
+            # 解析 detect 输出 labels，生成 result.csv 并落库
+            pred_labels_dir = pred_dir / 'labels'
+            if not pred_labels_dir.exists():
+                raise FileNotFoundError(f"目标检测推理未生成标签目录: {pred_labels_dir}")
+
+            results_rows = []
+            seq = 0
+
+            for img_path in image_files:
+                seq += 1
+                img_name = img_path.name
+                rel_path = str(img_path.resolve())
+                label_file = pred_labels_dir / (img_path.stem + '.txt')
+                annotations = []
+                max_conf = 0.0
+                if label_file.exists():
+                    with open(label_file, 'r', encoding='utf-8') as lf:
+                        for line in lf:
+                            parts = line.strip().split()
+                            if not parts:
+                                continue
+                            if len(parts) >= 5:
+                                cid = int(float(parts[0]))
+                                x = float(parts[1])
+                                y = float(parts[2])
+                                w = float(parts[3])
+                                h = float(parts[4])
+                                conf = float(parts[5]) if len(parts) >= 6 else 0.0
+                                annotations.append({
+                                    'label': class_list[cid] if cid < len(class_list) else str(cid),
+                                    'x': x,
+                                    'y': y,
+                                    'w': w,
+                                    'h': h,
+                                    'confidence': conf,
+                                    'shape_type': 'rectangle',
+                                    'source': 'model',
+                                    'decision': 'pending',
+                                    'sample_mode': 'model_prediction',
+                                })
+                    annotations.sort(key=lambda item: float(item.get('confidence') or 0.0), reverse=True)
+                    annotations = annotations[:DETECTION_MAX_BOXES_PER_IMAGE]
+                    max_conf = max((float(item.get('confidence') or 0.0) for item in annotations), default=0.0)
+
+                uncertainty_score, low_confidence_count = detection_uncertainty(annotations)
+                results_rows.append({
+                    'sequence_number': seq,
+                    'image_name': img_name,
+                    'image_path': rel_path,
+                    'annotations': annotations,
+                    'confidence': max_conf,
+                    'uncertainty_score': uncertainty_score,
+                    'low_confidence_count': low_confidence_count,
+                    'detection_count': len(annotations),
+                    'status': 'unverified'
+                })
+
+            # 将结果写入数据库（ImageResult）
+            predicted_image_count = sum(1 for row in results_rows if row['annotations'])
+            predicted_box_count = sum(len(row['annotations']) for row in results_rows)
+            logger.info(
+                "object detection predict finished: %s/%s images with boxes, %s boxes total",
+                predicted_image_count,
+                len(results_rows),
+                predicted_box_count,
+            )
+            if predicted_box_count == 0:
+                logger.warning(
+                    "目标检测推理没有生成任何高置信候选框；将保留未标注图片为空框状态，避免写入低置信度噪声框。"
+                )
+
+            with open(result_file_path, 'w', encoding='utf-8', newline='') as rf:
+                writer = csv.DictWriter(
+                    rf,
+                    fieldnames=[
+                        'sequence_number',
+                        'image_name',
+                        'image_path',
+                        'annotations',
+                        'confidence',
+                        'uncertainty_score',
+                        'low_confidence_count',
+                        'detection_count',
+                        'status',
+                    ],
+                )
+                writer.writeheader()
+                for row in results_rows:
+                    csv_row = row.copy()
+                    csv_row['annotations'] = json.dumps(csv_row['annotations'], ensure_ascii=False)
+                    writer.writerow(csv_row)
+
+            ResultModel = apps.get_model('data_management', 'ImageResult')
+
+            manual_image_names = set(
+                ResultModel.objects
+                .filter(task=task, confidence=-1)
+                .values_list('image_name', flat=True)
+            )
+
+            with transaction.atomic():
+                # 只清理模型预测结果，保留人工标注 ground truth。
+                ResultModel.objects.filter(task=task).exclude(confidence=-1).delete()
+                instances = []
+                for r in results_rows:
+                    if r['image_name'] in manual_image_names:
+                        continue
+                    instances.append(ResultModel(
+                        task=task,
+                        sequence_number=r['sequence_number'],
+                        image_name=r['image_name'],
+                        image_path=r['image_path'],
+                        label='',
+                        confidence=r['confidence'],
+                        annotations=r['annotations'],
+                        status='unverified'
+                    ))
+                if instances:
+                    ResultModel.objects.bulk_create(instances)
+
+            _update_task_progress(task, 90, self)
+            # 最终推进到完成状态由外层逻辑处理
+
         # --- 任务完成 ---
         task.progress = 100
         task.status = 'completed'
@@ -866,4 +1593,5 @@ def process_annotation_task(self, task_id):
         task.status = 'failed'
         task.error_log = f"内部服务器错误: {e}"
         task.save(update_fields=['status', 'error_log'])
-        raise self.retry(exc=e, countdown=120)
+        # 不再自动重试，避免训练脚本持续失败时反复占用 worker。
+        raise Ignore()

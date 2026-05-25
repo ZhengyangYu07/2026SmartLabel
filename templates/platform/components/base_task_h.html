@@ -61,7 +61,7 @@
           </div>
         </div>
 
-        {% if task.task_type == 'image-classification' or task.task_type == 'text-classification' %}
+        {% if task.task_type == 'image-classification' or task.task_type == 'text-classification' or task.task_type == 'object-detection' %}
         <div id="global-rerun-wrap" class="relative group mr-1">
           <button
             id="global-rerun-btn"
@@ -94,6 +94,13 @@
           class="inline-flex items-center px-4 py-2 rounded-full border border-white/30 transition-colors {% if task_view_mode == 'unlabeled' or task_view_mode == 'manual' %}bg-white text-purple-900 font-semibold{% else %}bg-white/10 text-white hover:bg-white/20{% endif %}"
         >
           未标注
+        </a>
+        {% elif task.task_type == 'object-detection' %}
+        <a
+          href="{% url 'manual_annotation' task.id %}"
+          class="inline-flex items-center px-4 py-2 rounded-full border border-white/30 transition-colors {% if task_view_mode == 'manual' %}bg-white text-purple-900 font-semibold{% else %}bg-white/10 text-white hover:bg-white/20{% endif %}"
+        >
+          人工标注
         </a>
         {% else %}
         <a
@@ -631,9 +638,7 @@
       return;
     }
 
-    const confirmed = confirm(
-      "确认删除这个任务吗？",
-    );
+    const confirmed = confirm("确认删除这个任务吗？");
     if (!confirmed) {
       return;
     }
@@ -677,9 +682,7 @@
       return;
     }
 
-    const confirmed = confirm(
-      "确认重新训练吗？",
-    );
+    const confirmed = confirm("确认重新训练吗？");
     if (!confirmed) {
       return;
     }
@@ -702,16 +705,16 @@
 
       const data = await parseApiResponse(response);
       if (!response.ok || data.status !== "success") {
-        throw new Error(data.message || "重新调用失败");
+        throw new Error(data.message || "重新训练失败");
       }
 
-      showMessage(data.message || "已重新调用半监督算法", "success", 2200);
+      showMessage(data.message || "已重新训练", "success", 2200);
       setTimeout(() => {
         location.reload();
       }, 1200);
     } catch (error) {
-      console.error("重新调用半监督算法失败:", error);
-      showMessage(error.message || "重新调用失败", "error");
+      console.error("重新训练失败:", error);
+      showMessage(error.message || "重新训练失败", "error");
     } finally {
       rerunRequestInFlight = false;
       if (btn) {
