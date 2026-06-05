@@ -421,10 +421,16 @@ document.addEventListener("DOMContentLoaded", () => {
     async startProgressPolling(taskId) {
       let lastProgress = -1;
       let lastStatus = "";
+      let completionHandled = false;
 
       console.log(`开始轮询任务 ${taskId} 的进度`);
 
       const intervalId = setInterval(async () => {
+        if (completionHandled) {
+          clearInterval(intervalId);
+          this.config.pollingIntervals.delete(taskId);
+          return;
+        }
         const card = document.querySelector(
           `.task-card[data-task-id="${taskId}"]`,
         );
@@ -500,6 +506,7 @@ document.addEventListener("DOMContentLoaded", () => {
             elements.fill.className = `progress-fill ${newColorClass} h-2 rounded-full transition-all duration-500`;
 
             if (["completed", "failed"].includes(data.status)) {
+              completionHandled = true;
               console.log(
                 `[任务 ${taskId}] 任务已结束，状态: ${data.status}，停止轮询`,
               );

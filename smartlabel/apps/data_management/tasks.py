@@ -27,13 +27,26 @@ from .models import Task
 
 MIN_UPDATE_INTERVAL = 0.5
 logger = logging.getLogger(__name__)
-DETECTION_PREDICT_CONF_THRES = 0.25
+DETECTION_TRAIN_EPOCHS = int(os.environ.get('SMARTLABEL_DETECTION_EPOCHS', '50'))
+DETECTION_TRAIN_BATCH_SIZE = int(os.environ.get('SMARTLABEL_DETECTION_BATCH_SIZE', '8'))
+DETECTION_FREEZE_LAYER_NUM = int(os.environ.get('SMARTLABEL_DETECTION_FREEZE_LAYER_NUM', '10'))
+DETECTION_MIN_TRAIN_IMAGES = int(os.environ.get('SMARTLABEL_DETECTION_MIN_TRAIN_IMAGES', '20'))
+DETECTION_PREDICT_CONF_THRES = float(os.environ.get('SMARTLABEL_DETECTION_CONF_THRES', '0.05'))
+DETECTION_STORE_CONF_THRES = float(os.environ.get('SMARTLABEL_DETECTION_STORE_CONF_THRES', '0.25'))
 DETECTION_PREDICT_IOU_THRES = 0.45
 DETECTION_PREDICT_MAX_DET = 100
 DETECTION_MAX_BOXES_PER_IMAGE = 100
+DETECTION_MIN_FINE_TUNED_BOXES = int(os.environ.get('SMARTLABEL_DETECTION_MIN_FINE_TUNED_BOXES', '50'))
+DETECTION_MIN_FINE_TUNED_IMAGE_RATIO = float(os.environ.get('SMARTLABEL_DETECTION_MIN_FINE_TUNED_IMAGE_RATIO', '0.05'))
+DETECTION_PRETRAINED_WEIGHT_CANDIDATES = [
+    Path(settings.BASE_DIR) / 'models' / 'efficient-yolov5l-obj365.pt',
+    Path(settings.BASE_DIR) / 'models' / 'yolov5l.pt',
+    Path(settings.BASE_DIR) / 'smartlabel' / 'apps' / 'algorithm' / 'efficientteacher-main' / 'models' / 'efficient-yolov5l-obj365.pt',
+    Path(settings.BASE_DIR) / 'smartlabel' / 'apps' / 'algorithm' / 'efficientteacher-main' / 'models' / 'yolov5l.pt',
+]
 DETECTION_PRETRAINED_WEIGHT = Path(os.environ.get(
     'SMARTLABEL_EFFICIENTTEACHER_WEIGHTS',
-    str(Path(settings.BASE_DIR) / 'models' / 'efficient-yolov5l-obj365.pt'),
+    str(next((p for p in DETECTION_PRETRAINED_WEIGHT_CANDIDATES if p.exists()), DETECTION_PRETRAINED_WEIGHT_CANDIDATES[0])),
 ))
 DETECTION_LABEL_ALIASES = {
     '船': 'ship',
@@ -43,6 +56,17 @@ DETECTION_LABEL_ALIASES = {
     '汽车': 'car',
     '车辆': 'car',
     '飞机': 'airplane',
+}
+DETECTION_COCO_CLASS_INDEX = {
+    'person': 0,
+    'bicycle': 1,
+    'car': 2,
+    'motorcycle': 3,
+    'airplane': 4,
+    'bus': 5,
+    'train': 6,
+    'truck': 7,
+    'boat': 8,
 }
 DEFAULT_TEXT_CLASSIFICATION_BERT_MODEL = Path(os.environ.get(
     'SMARTLABEL_TEXT_CLASSIFICATION_BERT_MODEL',
@@ -181,7 +205,6 @@ def run_subprocess_with_progress(cmd, task_id, total_files=None):
         progress_pattern = re.compile(r'处理进度: (\d+)%')
         
         # --- 模式A：基于文件计数的正则 ---
-        # 匹配 qwen_img.py 可能的输出，例如 "Processing image: xxx.jpg"
         file_progress_pattern = re.compile(r'Processing image:|正在处理图像:') 
 
         current_progress = 0
@@ -352,126 +375,6 @@ def save_results_to_database(result_file_path, task, task_type, update_progress_
         _update_task_progress(task, progress_end)
 
 
-# 辅助函数，用于处理通用的任务逻辑和子进程调用
-def _process_common_pretrained_task(self, task_id, task, update_progress, result_dir, extract_dir, output_csv, config_path, result_file_path):
-    """
-    通用逻辑，用于处理预训练模式下的图像和文本分类。
-    此函数仅为内部调用，不作为 Celery task。
-    """
-    cmd = []
-    total_input_items = 0
-    
-    if task.task_type == 'image-classification':
-        # 构建图像分类的配置
-        config = {
-            "image_path": extract_dir,
-            "label_choices": [],
-            "restrict_labels": True,
-            "output_path": output_csv,
-            "generation_params": {
-                "do_sample": True,
-                "temperature": 0.7,
-                "top_p": 0.9,
-                "max_new_tokens": 512
-            }
-        }
-        # 获取图片文件数量，用于进度跟踪
-        for root, _, files in os.walk(extract_dir):
-            for file in files:
-                if file.lower().endswith(('.png', '.jpg', '.jpeg')):
-                    total_input_items += 1
-        
-        # 构建命令
-        cmd = [
-            'conda', 'run', '--no-capture-output', '-n', 'qwen', 'python',
-            os.path.join(settings.BASE_DIR, 'smartlabel', 'apps', 'algorithm', 'qwen', 'qwen_img.py'),
-            '--config', config_path
-        ]
-        
-    elif task.task_type == 'text-classification':
-        # 定义常见文本列名关键词
-        TEXT_COLUMN_KEYWORDS = ['text', 'content', 'body', 'sentence', 'article', 'description', 'message']
-        
-        # 统计所有CSV文件中的文本条目总数，用于进度跟踪
-        total_input_items = 0
-        csv_files = list(Path(extract_dir).glob('*.csv'))
-
-        if not csv_files:
-            raise FileNotFoundError(f"文本分类任务未在目录 {extract_dir} 中找到任何CSV文件。")
-
-        for csv_file_path in csv_files:
-            logger.info(f"正在统计文件: {csv_file_path}")
-            with open(csv_file_path, newline='', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                header = next(reader, None) # 读取第一行，可能是标题
-                
-                is_header_row = False
-                if header:
-                    cleaned_header = [h.strip().lower() for h in header]
-                    for keyword in TEXT_COLUMN_KEYWORDS:
-                        if keyword in cleaned_header:
-                            is_header_row = True
-                            break
-                
-                # 如果第一行是数据行，则算入统计
-                if not is_header_row and header:
-                    total_input_items += 1 # 统计第一行作为数据
-
-                # 统计剩余行
-                for _ in reader:
-                    total_input_items += 1
-        
-        if total_input_items == 0:
-            raise ValueError(f"从目录 {extract_dir} 中的CSV文件未能提取任何文本数据。")
-
-        logger.info(f"总计找到 {total_input_items} 条文本数据待处理。")
-
-        # 预训练模式下，不再根据分类场景设置标签列表
-        label_choices = []
-        
-        config = {
-            "text_input_dir": str(extract_dir),
-            "dataset_path": str(extract_dir),
-            "output_path": output_csv,
-            "label_choices": label_choices,
-            "bert_model": "bert-base-chinese",
-            "device": "cuda" if torch.cuda.is_available() else "cpu",
-            "epochs": 6,
-            "batch_size": 32,
-            "learning_rate": 2e-5,
-            "max_length": 128,
-            "hidden_dim": 256
-        }
-
-        # 全部使用 BERT
-        cmd = [
-            'conda', 'run', '--no-capture-output', '-n', 'bert', 'python',
-            os.path.join(settings.BASE_DIR, 'smartlabel', 'apps', 'algorithm', 'bert', 'train.py'),
-            '--config', config_path
-        ]
-        
-    else:
-        raise ValueError(f"未知或不支持的任务类型: {task.task_type}")
-
-    # 保存配置文件
-    with open(config_path, 'w', encoding='utf-8') as f:
-        json.dump(config, f, ensure_ascii=False, indent=4)
-    
-    # 记录命令到日志
-    logger.info(f"执行命令: {' '.join(cmd)}")
-    
-    # 运行命令
-    run_subprocess_with_progress(cmd, task_id, total_files=total_input_items)
-    
-    # 检查结果文件是否存在
-    result_path = Path(result_file_path)
-    if result_path.exists():
-        # 保存结果到数据库
-        save_results_to_database(result_path, task, task.task_type, update_progress)
-    else:
-        raise FileNotFoundError(f"{task.task_type} 结果文件不存在: {result_file_path}")
-
-
 def _merge_manual_labels_if_needed(task):
     """如果存在人工标注文件，则与原始标注文件合并后返回新的 CSV 路径。"""
     manual_label_path = Path(settings.MEDIA_ROOT) / 'results' / str(task.id) / 'manual_labels.csv'
@@ -514,78 +417,6 @@ def _merge_manual_labels_if_needed(task):
 
 def _manual_text_label_path(task):
     return Path(settings.MEDIA_ROOT) / 'results' / str(task.id) / 'manual_text_labels.csv'
-
-
-@shared_task(
-    bind=True,
-    time_limit=7200,
-    soft_time_limit=3600
-)
-def process_pretrained_task(self, task_id, *args, **kwargs):
-    """处理预训练任务"""
-    logger.info(f"开始处理预训练任务 {task_id}")
-    
-    try:
-        # 获取任务对象
-        task = Task.objects.get(id=task_id)
-        task.status = 'processing'
-        if task.progress < 1:
-            task.progress = 1
-        task.celery_task_id = self.request.id
-        task.save(update_fields=['status', 'progress', 'celery_task_id'])
-
-        # 创建进度跟踪器
-        update_progress = create_progress_tracker(task, task_id, self)
-
-        # 创建结果目录
-        result_dir = os.path.join(settings.MEDIA_ROOT, 'results', str(task_id))
-        os.makedirs(result_dir, exist_ok=True)
-        
-        # 输入数据集
-        extract_dir = os.path.join(settings.MEDIA_ROOT, 'extracted', str(task_id))
-
-        # 输出CSV文件路径
-        output_csv = os.path.join(result_dir, 'result.csv')
-        
-        # 配置文件路径
-        config_path = os.path.join(result_dir, 'config.json')
-        result_file_path = os.path.join(result_dir, 'result.csv')
-        
-        # 调用通用处理函数
-        _process_common_pretrained_task(self, task_id, task, update_progress, result_dir, extract_dir, output_csv, config_path, result_file_path)
-        
-        # 更新任务状态
-        task.progress = 100 # 确保进度是100
-        task.status = 'completed'
-        task.save()
-        
-        logger.info(f"预训练任务 {task_id} 处理完成")
-        
-    except Task.DoesNotExist:
-        logger.error(f"任务 {task_id} 不存在")
-        # 直接忽略不存在任务，避免向结果后端写入不完整异常结构触发 exc_type 反序列化错误。
-        raise Ignore()
-    except Exception as e:
-        logger.error(f"处理预训练任务 {task_id} 时出错: {str(e)}")
-        
-        # 更新任务状态为失败 - 修复错误字段问题
-        try:
-            task = Task.objects.get(id=task_id)
-            task.status = 'failed'
-            if hasattr(task, 'error_message'): # 确保 Task 模型有这个字段
-                task.error_message = str(e)
-                task.save(update_fields=['status', 'error_message'])
-            elif hasattr(task, 'error_log'): # 如果是 error_log 字段
-                task.error_log = str(e)
-                task.save(update_fields=['status', 'error_log'])
-            else:
-                task.save(update_fields=['status'])
-                logger.error(f"任务失败原因: {str(e)}")
-        except Exception as update_error:
-            logger.error(f"更新任务状态失败: {str(update_error)}")
-
-        # 训练错误通常是确定性的，不再自动重试，避免 worker 反复重复运行同一任务。
-        raise Ignore()
 
 
 @shared_task(
@@ -1095,7 +926,10 @@ def process_annotation_task(self, task_id):
                     logger.warning("任务 %s 解析 COCO 标注失败，将继续使用人工标注流程: %s", task_id, e)
 
             db_manual_map = {}
+            db_manual_confirmed_names = set()
             for ir in ImageResult.objects.filter(task=task).all():
+                if ir.confidence == -1:
+                    db_manual_confirmed_names.add(ir.image_name)
                 if not ir.annotations:
                     continue
                 confirmed_annotations = []
@@ -1109,10 +943,11 @@ def process_annotation_task(self, task_id):
                 if confirmed_annotations:
                     db_manual_map[ir.image_name] = confirmed_annotations
             labeled_map.update(db_manual_map)
-            if db_manual_map:
+            if db_manual_map or db_manual_confirmed_names:
                 logger.info(
-                    "任务 %s 合并数据库人工确认标注 %s 张图片；训练标注总计 %s 张图片",
+                    "任务 %s 合并数据库人工确认样本 %s 张图片，其中 %s 张含目标框；训练标注总计 %s 张图片",
                     task_id,
+                    len(db_manual_confirmed_names),
                     len(db_manual_map),
                     len(labeled_map),
                 )
@@ -1219,7 +1054,14 @@ def process_annotation_task(self, task_id):
                 if usable_boxes:
                     usable_labeled_map[image_name] = usable_boxes
 
+            manual_negative_names = db_manual_confirmed_names - set(usable_labeled_map.keys())
             labeled_map = usable_labeled_map
+            if manual_negative_names:
+                logger.info(
+                    "任务 %s 检测到 %s 张人工确认无目标图片，将作为目标检测负样本参与训练",
+                    task_id,
+                    len(manual_negative_names),
+                )
 
             # 如果 Task 中预设了 label_list，优先使用
             if task.label_list:
@@ -1275,14 +1117,333 @@ def process_annotation_task(self, task_id):
             _update_task_progress(task, 20, self)
 
             # 生成 train/val/target 列表
-            labeled_images = [
-                p for p in image_files
-                if _label_path_for_image(p).exists() and _label_path_for_image(p).stat().st_size > 0
-            ]
+            labeled_images = []
+            positive_labeled_images = []
+            for p in image_files:
+                label_path = _label_path_for_image(p)
+                is_positive = label_path.exists() and label_path.stat().st_size > 0
+                is_manual_negative = p.name in manual_negative_names
+                if is_positive:
+                    positive_labeled_images.append(p)
+                if is_positive or is_manual_negative:
+                    labeled_images.append(p)
             unlabeled_images = [p for p in image_files if p not in labeled_images]
 
+            detect_py = Path(settings.BASE_DIR) / 'smartlabel' / 'apps' / 'algorithm' / 'efficientteacher-main' / 'detect.py'
+            detect_source = extract_dir / 'images' if (extract_dir / 'images').exists() else extract_dir
+
+            def _detection_empty_uncertainty(image_path):
+                try:
+                    from PIL import Image
+                    with Image.open(image_path) as img:
+                        gray = img.convert('L').resize((64, 64))
+                        histogram = gray.histogram()
+                        total = float(sum(histogram)) or 1.0
+                        entropy = -sum(
+                            (count / total) * math.log2(count / total)
+                            for count in histogram
+                            if count
+                        )
+                        return round(max(0.0, min(1.0, entropy / 8.0)), 6)
+                except Exception:
+                    try:
+                        return round(max(0.0, min(1.0, image_path.stat().st_size / (1024 * 1024))), 6)
+                    except Exception:
+                        return 0.0
+
+            def _build_empty_detection_rows():
+                rows = []
+                for seq, img_path in enumerate(image_files, start=1):
+                    rows.append({
+                        'sequence_number': seq,
+                        'image_name': img_path.name,
+                        'image_path': str(img_path.resolve()),
+                        'annotations': [],
+                        'confidence': 0.0,
+                        'uncertainty_score': _detection_empty_uncertainty(img_path),
+                        'low_confidence_count': 0,
+                        'detection_count': 0,
+                        'status': 'unverified',
+                    })
+                return rows
+
+            def _coco_id_to_label_map():
+                coco_id_to_label = {}
+                for label in class_list:
+                    normalized_label = DETECTION_LABEL_ALIASES.get(str(label).strip(), str(label).strip())
+                    coco_id = DETECTION_COCO_CLASS_INDEX.get(normalized_label)
+                    if coco_id is not None:
+                        coco_id_to_label[coco_id] = normalized_label
+                return coco_id_to_label
+
+            def _collect_detection_rows_from_labels(pred_labels_dir, id_to_label, sample_mode):
+                rows = []
+                raw_count = 0
+                filtered_count = 0
+                for seq, img_path in enumerate(image_files, start=1):
+                    label_file = pred_labels_dir / (img_path.stem + '.txt')
+                    annotations = []
+                    max_conf = 0.0
+                    if label_file.exists():
+                        with open(label_file, 'r', encoding='utf-8') as lf:
+                            for line in lf:
+                                parts = line.strip().split()
+                                if not parts or len(parts) < 5:
+                                    continue
+                                cid = int(float(parts[0]))
+                                label = id_to_label.get(cid)
+                                if not label:
+                                    continue
+                                x = float(parts[1])
+                                y = float(parts[2])
+                                w = float(parts[3])
+                                h = float(parts[4])
+                                conf = float(parts[5]) if len(parts) >= 6 else 0.0
+                                raw_count += 1
+                                if conf < DETECTION_STORE_CONF_THRES:
+                                    filtered_count += 1
+                                    continue
+                                annotations.append({
+                                    'label': label,
+                                    'x': x,
+                                    'y': y,
+                                    'w': w,
+                                    'h': h,
+                                    'confidence': conf,
+                                    'shape_type': 'rectangle',
+                                    'source': 'model',
+                                    'decision': 'pending',
+                                    'sample_mode': sample_mode,
+                                })
+                        annotations.sort(key=lambda item: float(item.get('confidence') or 0.0), reverse=True)
+                        annotations = annotations[:DETECTION_MAX_BOXES_PER_IMAGE]
+                        max_conf = max((float(item.get('confidence') or 0.0) for item in annotations), default=0.0)
+
+                    uncertainty_score, low_confidence_count = detection_uncertainty(annotations)
+                    if not annotations:
+                        uncertainty_score = max(uncertainty_score, _detection_empty_uncertainty(img_path))
+                    rows.append({
+                        'sequence_number': seq,
+                        'image_name': img_path.name,
+                        'image_path': str(img_path.resolve()),
+                        'annotations': annotations,
+                        'confidence': max_conf,
+                        'uncertainty_score': uncertainty_score,
+                        'low_confidence_count': low_confidence_count,
+                        'detection_count': len(annotations),
+                        'status': 'unverified',
+                    })
+                return rows, raw_count, filtered_count
+
+            def _run_pretrained_detection_rows(reason):
+                if not DETECTION_PRETRAINED_WEIGHT.exists():
+                    logger.warning("目标检测基础预训练权重不存在，无法执行 %s: %s", reason, DETECTION_PRETRAINED_WEIGHT)
+                    return _build_empty_detection_rows(), 0, 0
+                coco_id_to_label = _coco_id_to_label_map()
+                if not coco_id_to_label:
+                    logger.info("当前目标检测标签不在 COCO 基础类别中，跳过基础模型冷启动推理: labels=%s", class_list)
+                    return _build_empty_detection_rows(), 0, 0
+
+                pred_dir = Path(result_dir) / 'pred'
+                if pred_dir.exists():
+                    import shutil
+                    shutil.rmtree(pred_dir)
+                cmd = [
+                    'conda', 'run', '--no-capture-output', '-n', 'efficientteacher', 'python',
+                    str(detect_py),
+                    '--weights', str(DETECTION_PRETRAINED_WEIGHT),
+                    '--source', str(detect_source),
+                    '--imgsz', '640',
+                    '--conf-thres', str(DETECTION_PREDICT_CONF_THRES),
+                    '--iou-thres', str(DETECTION_PREDICT_IOU_THRES),
+                    '--max-det', str(DETECTION_PREDICT_MAX_DET),
+                    '--save-txt',
+                    '--save-conf',
+                    '--project', str(result_dir),
+                    '--name', 'pred',
+                    '--exist-ok',
+                    '--classes',
+                    *[str(i) for i in sorted(coco_id_to_label.keys())],
+                ]
+                logger.info(
+                    "目标检测基础预训练推理: reason=%s, weight=%s, label_map=%s",
+                    reason,
+                    DETECTION_PRETRAINED_WEIGHT,
+                    coco_id_to_label,
+                )
+                run_subprocess_with_progress(cmd, task_id)
+                pred_labels_dir = pred_dir / 'labels'
+                if not pred_labels_dir.exists():
+                    return _build_empty_detection_rows(), 0, 0
+                return _collect_detection_rows_from_labels(
+                    pred_labels_dir,
+                    coco_id_to_label,
+                    'base_pretrained_prediction',
+                )
+
+            def _persist_detection_rows(rows, mode):
+                result_dir.mkdir(parents=True, exist_ok=True)
+                with open(result_file_path, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.DictWriter(
+                        f,
+                        fieldnames=[
+                            'sequence_number',
+                            'image_name',
+                            'image_path',
+                            'annotations',
+                            'confidence',
+                            'uncertainty_score',
+                            'low_confidence_count',
+                            'detection_count',
+                            'status',
+                        ],
+                    )
+                    writer.writeheader()
+                    for row in rows:
+                        csv_row = row.copy()
+                        csv_row['annotations'] = json.dumps(csv_row['annotations'], ensure_ascii=False)
+                        writer.writerow(csv_row)
+
+                ResultModel = apps.get_model('data_management', 'ImageResult')
+                manual_image_names = set(
+                    ResultModel.objects
+                    .filter(task=task, confidence=-1)
+                    .values_list('image_name', flat=True)
+                )
+                with transaction.atomic():
+                    ResultModel.objects.filter(task=task).exclude(confidence=-1).delete()
+                    instances = []
+                    for row in rows:
+                        if row['image_name'] in manual_image_names:
+                            continue
+                        instances.append(ResultModel(
+                            task=task,
+                            sequence_number=row['sequence_number'],
+                            image_name=row['image_name'],
+                            image_path=row['image_path'],
+                            label='',
+                            confidence=row['confidence'],
+                            annotations=row['annotations'],
+                            status=row['status'],
+                        ))
+                    if instances:
+                        ResultModel.objects.bulk_create(instances)
+
+                _update_task_progress(task, 95, self)
+                task.progress = 100
+                task.status = 'completed'
+                task.save(update_fields=['progress', 'status'])
+                logger.info(
+                    "目标检测任务 %s 已完成 %s，写入 %s 条候选样本，其中 %s 条包含预测框",
+                    task_id,
+                    mode,
+                    len(rows),
+                    sum(1 for row in rows if row['annotations']),
+                )
+
+            if len(positive_labeled_images) < DETECTION_MIN_TRAIN_IMAGES:
+                active_mode = 'cold_start' if not positive_labeled_images else 'few_shot_active_learning'
+                rows, raw_count, filtered_count = _run_pretrained_detection_rows(
+                    active_mode
+                )
+                logger.info(
+                    "目标检测正样本不足，跳过微调训练: positive_labeled=%s, labeled_total=%s, min_required=%s, raw_boxes=%s, filtered_low_confidence=%s",
+                    len(positive_labeled_images),
+                    len(labeled_images),
+                    DETECTION_MIN_TRAIN_IMAGES,
+                    raw_count,
+                    filtered_count,
+                )
+                _persist_detection_rows(rows, active_mode)
+                return {
+                    "status": "success",
+                    "task_id": task_id,
+                    "mode": active_mode,
+                }
+
             if not labeled_images:
-                raise ValueError("目标检测任务未检测到可用标注。请上传含 COCO/VOC/YOLO 标注的数据压缩包，或先在界面完成至少1张人工标注后再提交。")
+                def _cold_start_detection_uncertainty(image_path):
+                    try:
+                        from PIL import Image
+                        with Image.open(image_path) as img:
+                            gray = img.convert('L').resize((64, 64))
+                            histogram = gray.histogram()
+                            total = float(sum(histogram)) or 1.0
+                            entropy = -sum(
+                                (count / total) * math.log2(count / total)
+                                for count in histogram
+                                if count
+                            )
+                            return round(max(0.0, min(1.0, entropy / 8.0)), 6)
+                    except Exception:
+                        try:
+                            return round(max(0.0, min(1.0, image_path.stat().st_size / (1024 * 1024))), 6)
+                        except Exception:
+                            return 0.0
+
+                result_rows = []
+                for seq, img_path in enumerate(image_files, start=1):
+                    result_rows.append({
+                        'sequence_number': seq,
+                        'image_name': img_path.name,
+                        'image_path': str(img_path.resolve()),
+                        'annotations': [],
+                        'confidence': 0.0,
+                        'uncertainty_score': _cold_start_detection_uncertainty(img_path),
+                        'low_confidence_count': 0,
+                        'detection_count': 0,
+                        'status': 'unverified',
+                    })
+
+                result_dir.mkdir(parents=True, exist_ok=True)
+                with open(result_file_path, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.DictWriter(
+                        f,
+                        fieldnames=[
+                            'sequence_number',
+                            'image_name',
+                            'image_path',
+                            'annotations',
+                            'confidence',
+                            'uncertainty_score',
+                            'low_confidence_count',
+                            'detection_count',
+                            'status',
+                        ],
+                    )
+                    writer.writeheader()
+                    for row in result_rows:
+                        csv_row = row.copy()
+                        csv_row['annotations'] = json.dumps(csv_row['annotations'], ensure_ascii=False)
+                        writer.writerow(csv_row)
+
+                ResultModel = apps.get_model('data_management', 'ImageResult')
+                with transaction.atomic():
+                    ResultModel.objects.filter(task=task).delete()
+                    ResultModel.objects.bulk_create([
+                        ResultModel(
+                            task=task,
+                            sequence_number=row['sequence_number'],
+                            image_name=row['image_name'],
+                            image_path=row['image_path'],
+                            label='',
+                            confidence=row['confidence'],
+                            annotations=row['annotations'],
+                            status=row['status'],
+                        )
+                        for row in result_rows
+                    ])
+
+                _update_task_progress(task, 95, self)
+                task.progress = 100
+                task.status = 'completed'
+                task.save(update_fields=['progress', 'status'])
+                logger.info(
+                    "目标检测任务 %s 未检测到可用标注，已生成 %s 条冷启动待标注样本。",
+                    task_id,
+                    len(result_rows),
+                )
+                return {"status": "success", "task_id": task_id, "mode": "cold_start"}
 
             # 简单划分 val（10% 的有标签样本）
             if len(labeled_images) == 1:
@@ -1334,20 +1495,26 @@ def process_annotation_task(self, task_id):
             # 创建 EfficientTeacher 配置文件（基于官方 yolov5 模板，避免默认值触发 NotImplementedError）
             cfg_name = f"task_{task_id}_effteacher"
             cfg_path = Path(result_dir) / 'config.yaml'
+            if not DETECTION_PRETRAINED_WEIGHT.exists():
+                raise FileNotFoundError(
+                    f"目标检测固定预训练权重不存在: {DETECTION_PRETRAINED_WEIGHT}。"
+                    "请先放置平台只读基础权重，可使用 models/efficient-yolov5l-obj365.pt "
+                    "或 models/yolov5l.pt；目标检测任务只允许在该权重上进行任务级微调。"
+                )
+
             cfg_lines = []
             cfg_lines.append(f"project: '{result_dir}'")
             cfg_lines.append(f"name: '{cfg_name}'")
-            cfg_lines.append("epochs: 5")
+            cfg_lines.append(f"epochs: {DETECTION_TRAIN_EPOCHS}")
             cfg_lines.append("adam: False")
-            pretrained_weight = str(DETECTION_PRETRAINED_WEIGHT) if DETECTION_PRETRAINED_WEIGHT.exists() else ''
+            cfg_lines.append(f"freeze_layer_num: {DETECTION_FREEZE_LAYER_NUM}")
+            pretrained_weight = str(DETECTION_PRETRAINED_WEIGHT)
             cfg_lines.append(f"weights: '{pretrained_weight}'")
-            if pretrained_weight:
-                logger.info("目标检测训练使用预训练权重: %s", pretrained_weight)
-            else:
-                logger.warning(
-                    "未找到目标检测预训练权重 %s，将从零训练；少量数据下可能无法生成可靠预测框。",
-                    DETECTION_PRETRAINED_WEIGHT,
-                )
+            logger.info(
+                "目标检测训练使用固定预训练权重: %s；冻结前 %s 个网络层，仅生成任务输出权重，不会覆盖基础权重",
+                pretrained_weight,
+                DETECTION_FREEZE_LAYER_NUM,
+            )
             cfg_lines.append("prune_finetune: False")
 
             cfg_lines.append("hyp:")
@@ -1383,7 +1550,7 @@ def process_annotation_task(self, task_id):
             cfg_lines.append("  data_name: 'custom'")
             cfg_lines.append(f"  nc: {len(class_list)}")
             cfg_lines.append(f"  img_size: 640")
-            cfg_lines.append(f"  batch_size: 16")
+            cfg_lines.append(f"  batch_size: {DETECTION_TRAIN_BATCH_SIZE}")
             # names 列表展开为行
             cfg_lines.append("  names: [" + ", ".join([f'\'{n}\'' for n in class_list]) + "]")
 
@@ -1437,10 +1604,14 @@ def process_annotation_task(self, task_id):
                 '--name', 'pred',
                 '--exist-ok',
             ]
+            if class_list:
+                detect_cmd.extend(['--classes', *[str(i) for i in range(len(class_list))]])
             logger.info(
-                "object detection predict args: source=%s, conf_thres=%s, iou_thres=%s, max_det=%s",
+                "object detection predict args: source=%s, classes=%s, conf_thres=%s, store_conf_thres=%s, iou_thres=%s, max_det=%s",
                 detect_source,
+                class_list,
                 DETECTION_PREDICT_CONF_THRES,
+                DETECTION_STORE_CONF_THRES,
                 DETECTION_PREDICT_IOU_THRES,
                 DETECTION_PREDICT_MAX_DET,
             )
@@ -1457,6 +1628,8 @@ def process_annotation_task(self, task_id):
 
             results_rows = []
             seq = 0
+            raw_predicted_box_count = 0
+            filtered_low_confidence_count = 0
 
             for img_path in image_files:
                 seq += 1
@@ -1473,13 +1646,26 @@ def process_annotation_task(self, task_id):
                                 continue
                             if len(parts) >= 5:
                                 cid = int(float(parts[0]))
+                                if cid < 0 or cid >= len(class_list):
+                                    logger.debug(
+                                        "跳过不属于当前任务标签集的目标检测类别: task=%s image=%s cid=%s labels=%s",
+                                        task_id,
+                                        img_name,
+                                        cid,
+                                        class_list,
+                                    )
+                                    continue
                                 x = float(parts[1])
                                 y = float(parts[2])
                                 w = float(parts[3])
                                 h = float(parts[4])
                                 conf = float(parts[5]) if len(parts) >= 6 else 0.0
+                                raw_predicted_box_count += 1
+                                if conf < DETECTION_STORE_CONF_THRES:
+                                    filtered_low_confidence_count += 1
+                                    continue
                                 annotations.append({
-                                    'label': class_list[cid] if cid < len(class_list) else str(cid),
+                                    'label': class_list[cid],
                                     'x': x,
                                     'y': y,
                                     'w': w,
@@ -1511,11 +1697,130 @@ def process_annotation_task(self, task_id):
             predicted_image_count = sum(1 for row in results_rows if row['annotations'])
             predicted_box_count = sum(len(row['annotations']) for row in results_rows)
             logger.info(
-                "object detection predict finished: %s/%s images with boxes, %s boxes total",
+                "object detection predict finished: %s/%s images with boxes, %s boxes stored, %s raw boxes, %s low-confidence boxes filtered",
                 predicted_image_count,
                 len(results_rows),
                 predicted_box_count,
+                raw_predicted_box_count,
+                filtered_low_confidence_count,
             )
+            min_fine_tuned_images = max(1, int(len(results_rows) * DETECTION_MIN_FINE_TUNED_IMAGE_RATIO))
+            fine_tuned_result_is_weak = (
+                predicted_box_count < DETECTION_MIN_FINE_TUNED_BOXES
+                or predicted_image_count < min_fine_tuned_images
+            )
+            if fine_tuned_result_is_weak and DETECTION_PRETRAINED_WEIGHT.exists() and DETECTION_PRETRAINED_WEIGHT.name.lower().startswith('yolov5'):
+                coco_id_to_label = {}
+                for label in class_list:
+                    normalized_label = DETECTION_LABEL_ALIASES.get(str(label).strip(), str(label).strip())
+                    coco_id = DETECTION_COCO_CLASS_INDEX.get(normalized_label)
+                    if coco_id is not None:
+                        coco_id_to_label[coco_id] = normalized_label
+                if coco_id_to_label:
+                    logger.warning(
+                        "目标检测微调结果低于可靠阈值，将使用基础预训练模型兜底: images=%s/%s, boxes=%s, min_images=%s, min_boxes=%s",
+                        predicted_image_count,
+                        len(results_rows),
+                        predicted_box_count,
+                        min_fine_tuned_images,
+                        DETECTION_MIN_FINE_TUNED_BOXES,
+                    )
+                    logger.warning(
+                        "目标检测任务微调权重没有生成候选框，改用基础 YOLOv5 COCO 预训练权重兜底推理: weight=%s, label_map=%s",
+                        DETECTION_PRETRAINED_WEIGHT,
+                        coco_id_to_label,
+                    )
+                    if pred_dir.exists():
+                        import shutil
+                        shutil.rmtree(pred_dir)
+                    fallback_cmd = [
+                        'conda', 'run', '--no-capture-output', '-n', 'efficientteacher', 'python',
+                        str(detect_py),
+                        '--weights', str(DETECTION_PRETRAINED_WEIGHT),
+                        '--source', str(detect_source),
+                        '--imgsz', '640',
+                        '--conf-thres', str(DETECTION_PREDICT_CONF_THRES),
+                        '--iou-thres', str(DETECTION_PREDICT_IOU_THRES),
+                        '--max-det', str(DETECTION_PREDICT_MAX_DET),
+                        '--save-txt',
+                        '--save-conf',
+                        '--project', str(result_dir),
+                        '--name', 'pred',
+                        '--exist-ok',
+                        '--classes',
+                        *[str(i) for i in sorted(coco_id_to_label.keys())],
+                    ]
+                    run_subprocess_with_progress(fallback_cmd, task_id)
+                    pred_labels_dir = pred_dir / 'labels'
+                    if not pred_labels_dir.exists():
+                        raise FileNotFoundError(f"目标检测基础预训练兜底推理未生成标签目录: {pred_labels_dir}")
+
+                    results_rows = []
+                    raw_predicted_box_count = 0
+                    filtered_low_confidence_count = 0
+                    for seq, img_path in enumerate(image_files, start=1):
+                        img_name = img_path.name
+                        rel_path = str(img_path.resolve())
+                        label_file = pred_labels_dir / (img_path.stem + '.txt')
+                        annotations = []
+                        max_conf = 0.0
+                        if label_file.exists():
+                            with open(label_file, 'r', encoding='utf-8') as lf:
+                                for line in lf:
+                                    parts = line.strip().split()
+                                    if not parts or len(parts) < 5:
+                                        continue
+                                    cid = int(float(parts[0]))
+                                    label = coco_id_to_label.get(cid)
+                                    if not label:
+                                        continue
+                                    x = float(parts[1])
+                                    y = float(parts[2])
+                                    w = float(parts[3])
+                                    h = float(parts[4])
+                                    conf = float(parts[5]) if len(parts) >= 6 else 0.0
+                                    raw_predicted_box_count += 1
+                                    if conf < DETECTION_STORE_CONF_THRES:
+                                        filtered_low_confidence_count += 1
+                                        continue
+                                    annotations.append({
+                                        'label': label,
+                                        'x': x,
+                                        'y': y,
+                                        'w': w,
+                                        'h': h,
+                                        'confidence': conf,
+                                        'shape_type': 'rectangle',
+                                        'source': 'model',
+                                        'decision': 'pending',
+                                        'sample_mode': 'base_pretrained_prediction',
+                                    })
+                            annotations.sort(key=lambda item: float(item.get('confidence') or 0.0), reverse=True)
+                            annotations = annotations[:DETECTION_MAX_BOXES_PER_IMAGE]
+                            max_conf = max((float(item.get('confidence') or 0.0) for item in annotations), default=0.0)
+
+                        uncertainty_score, low_confidence_count = detection_uncertainty(annotations)
+                        results_rows.append({
+                            'sequence_number': seq,
+                            'image_name': img_name,
+                            'image_path': rel_path,
+                            'annotations': annotations,
+                            'confidence': max_conf,
+                            'uncertainty_score': uncertainty_score,
+                            'low_confidence_count': low_confidence_count,
+                            'detection_count': len(annotations),
+                            'status': 'unverified'
+                        })
+                    predicted_image_count = sum(1 for row in results_rows if row['annotations'])
+                    predicted_box_count = sum(len(row['annotations']) for row in results_rows)
+                    logger.info(
+                        "object detection pretrained fallback finished: %s/%s images with boxes, %s boxes stored, %s raw boxes, %s low-confidence boxes filtered",
+                        predicted_image_count,
+                        len(results_rows),
+                        predicted_box_count,
+                        raw_predicted_box_count,
+                        filtered_low_confidence_count,
+                    )
             if predicted_box_count == 0:
                 logger.warning(
                     "目标检测推理没有生成任何高置信候选框；将保留未标注图片为空框状态，避免写入低置信度噪声框。"

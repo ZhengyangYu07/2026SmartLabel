@@ -48,8 +48,8 @@ logger = logging.getLogger(__name__)
 
 
 def _get_task_runners():
-    from .tasks import process_annotation_task, process_pretrained_task
-    return process_annotation_task, process_pretrained_task
+    from .tasks import process_annotation_task
+    return process_annotation_task
 
 
 def _get_configured_queue_names():
@@ -388,19 +388,9 @@ def submit_task(request):
         model_choice = request.POST.get('model_choice')
         model_strength = request.POST.get('model_strength')
 
-        # 兼容前端不再传 labeling_type 的场景：有标注文件视为半监督，否则默认预训练。
-        if raw_labeling_type in ('pre-trained', 'semi-supervised'):
-            labeling_type = raw_labeling_type
-        else:
-            labeling_type = 'semi-supervised' if label_file or task_type in ('image-classification', 'text-classification') else 'pre-trained'
-            logger.warning(
-                "submit_task 未收到有效 labeling_type，已自动推断为 %s (raw=%r)",
-                labeling_type,
-                raw_labeling_type,
-            )
-
-        if task_type in ('image-classification', 'text-classification') and not label_file:
-            labeling_type = 'semi-supervised'
+        if raw_labeling_type and raw_labeling_type != 'semi-supervised':
+            logger.info("submit_task 忽略已移除的 labeling_type=%r，统一使用半监督/人工标注流程", raw_labeling_type)
+        labeling_type = 'semi-supervised'
 
         if not task_name or not task_type or not data_file:
             return JsonResponse({'status': 'error', 'message': '任务名称、任务类型和数据文件为必填项'}, status=400)
@@ -573,41 +563,11 @@ def submit_task(request):
         # 启动Celery任务时传递任务类型
         try:
             celery_task = None
-            process_annotation_task, process_pretrained_task = _get_task_runners()
-            if (
-                task.task_type in ('image-classification', 'text-classification')
-                and not task.label_file
-            ):
-                celery_task = process_annotation_task.apply_async(
-                    args=[task.id],
-                    task_id=f'coldstart_{task.id}_{uuid.uuid4().hex[:6]}'
-                )
-            elif labeling_type == 'pre-trained':
-                # 若为目标检测任务，预训练模式目前使用半监督的处理函数（process_annotation_task）来完成训练流程
-                if task.task_type == 'object-detection':
-                    celery_task = process_annotation_task.apply_async(
-                        args=[task.id],
-                        task_id=f'pretrained_detection_{task.id}_{uuid.uuid4().hex[:6]}'
-                    )
-                else:
-                    # 图像/文本分类使用预训练处理函数
-                    celery_task = process_pretrained_task.apply_async(
-                        args=[task.id],
-                        task_id=f'pretrained_{task.id}_{uuid.uuid4().hex[:6]}'
-                    )
-            elif labeling_type == 'semi-supervised':
-                # 半监督模式下使用原有的process_annotation_task
-                celery_task = process_annotation_task.apply_async(
-                    args=[task.id],
-                    task_id=f'semisupervised_{task.id}_{uuid.uuid4().hex[:6]}'
-                )
-            else:
-                # 理论上不会进入此分支，保留为兜底，避免任务记录创建后未入队。
-                logger.warning("未知 labeling_type=%s，回退到预训练任务", labeling_type)
-                celery_task = process_pretrained_task.apply_async(
-                    args=[task.id],
-                    task_id=f'pretrained_{task.id}_{uuid.uuid4().hex[:6]}'
-                )
+            process_annotation_task = _get_task_runners()
+            celery_task = process_annotation_task.apply_async(
+                args=[task.id],
+                task_id=f'annotation_{task.id}_{uuid.uuid4().hex[:6]}'
+            )
 
             task.celery_task_id = celery_task.id
             task.save(update_fields=['celery_task_id'])
@@ -1212,12 +1172,6 @@ def task_detail(request, task_id):
     items = result_model.objects.filter(**{relation_field: task})
 
     context = TaskService.get_common_context(task)
-    if (
-        task.task_type in ('image-classification', 'text-classification')
-        and task.labeling_type == 'pre-trained'
-        and task.label_file
-    ):
-        context['task_completion_redirect_url'] = reverse('manual_annotation', args=[task.id])
     context.update({
         'items': items,
         'is_favorite': is_favorite,  # 添加收藏状态
@@ -1590,7 +1544,7 @@ def rerun_semi_supervised(request, task_id):
         task.error_log = ''
         task.save(update_fields=['status', 'progress', 'error_log'])
 
-        process_annotation_task, _ = _get_task_runners()
+        process_annotation_task = _get_task_runners()
         celery_task = process_annotation_task.apply_async(
             args=[task.id],
             task_id=f'manual_retrain_{task.id}_{uuid.uuid4().hex[:6]}'
@@ -1600,11 +1554,11 @@ def rerun_semi_supervised(request, task_id):
 
         return JsonResponse({
             'status': 'success',
-            'message': '已重新调用半监督算法',
+            'message': '已重新训练',
             'task_id': task.id,
         })
     except Exception as e:
-        logger.error(f"重新调用半监督算法失败 (task_id: {task_id}): {e}", exc_info=True)
+        logger.error(f"重新训练失败 (task_id: {task_id}): {e}", exc_info=True)
         return JsonResponse({'status': 'error', 'message': f'服务器内部错误: {str(e)}'}, status=500)
 
 

@@ -165,7 +165,6 @@ from kombu import Queue, Exchange
 CELERY_TASK_QUEUES = (
     Queue('default', Exchange('default'), routing_key='default'),
     Queue('annotation_tasks', Exchange('annotation_tasks'), routing_key='annotation_tasks'),
-    Queue('pretrained_tasks', Exchange('pretrained_tasks'), routing_key='pretrained_tasks'),
 )
 
 # 2. 明确指定默认队列，以防万一
@@ -179,10 +178,6 @@ CELERY_TASK_ROUTES = {
     'data_management.tasks.process_annotation_task': {
         'queue': 'annotation_tasks',
         'routing_key': 'annotation_tasks',
-    },
-    'data_management.tasks.process_pretrained_task': {
-        'queue': 'pretrained_tasks',
-        'routing_key': 'pretrained_tasks',
     },
     # 所有其他未明确指定的任务，都将进入 'default' 队列
     # 'data_management.tasks.*': {'queue': 'default'}, # 这行可以保留也可以注释，因为上面已经设置了默认队列

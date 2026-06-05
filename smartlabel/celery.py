@@ -106,8 +106,8 @@ if is_celery_worker:
                     cmdline = ' '.join(proc.info['cmdline'] or [])
                     is_training_process = any([
                         'text_classification/train.py' in cmdline,
-                        'qwen/qwen_txt.py' in cmdline,
-                        'qwen_wrapper.py' in cmdline
+                        'flexmatch/train.py' in cmdline,
+                        'img_classfication/train.py' in cmdline,
                     ])
                     if not is_training_process:
                         continue
@@ -170,7 +170,7 @@ if is_celery_worker:
                     cmdline_str = ' '.join(proc.info['cmdline'] or [])
                     if (f'results/{task_id}/' in cmdline_str and 
                         'python' in (proc.info['name'] or '') and 
-                        ('train.py' in cmdline_str or 'qwen_txt.py' in cmdline_str)):
+                        'train.py' in cmdline_str):
                         
                         celery_logger.info(f"Cleaning up subprocess for task {task_id}: PID={proc.info['pid']}")
                         try:

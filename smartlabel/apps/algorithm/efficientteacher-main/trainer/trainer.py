@@ -160,7 +160,7 @@ class Trainer:
         # Resume
         self.start_epoch = 0
         pretrained = cfg.weights.endswith('.pt') and not cfg.reinitial
-        if pretrained:
+        if pretrained and cfg.resume:
         # Optimizer
             if ckpt['optimizer'] is not None:
                 try:
@@ -186,6 +186,8 @@ class Trainer:
                 self.epochs += ckpt['epoch']  # finetune additional epochs
 
             # del ckpt, csd
+        elif pretrained:
+            LOGGER.info('Loaded pretrained model weights as initialization only; optimizer, EMA, and epoch state are not restored.')
         self.epoch = self.start_epoch
         self.model_type = self.model.model_type
         self.detect = self.model.head
@@ -247,7 +249,7 @@ class Trainer:
         self.scheduler = lr_scheduler.LambdaLR(self.optimizer, lr_lambda=self.lf)  # plot_lr_scheduler(optimizer, scheduler, epochs)
         self.scheduler.last_epoch = self.epoch - 1  # do not move
         self.scaler = amp.GradScaler(enabled=self.cuda)
-        if ckpt is not None and 'optimizer' in ckpt and ckpt['optimizer'] is not None:
+        if cfg.resume and ckpt is not None and 'optimizer' in ckpt and ckpt['optimizer'] is not None:
             print("Load Optimizer statedict")
             self.optimizer.load_state_dict(ckpt['optimizer'])
 

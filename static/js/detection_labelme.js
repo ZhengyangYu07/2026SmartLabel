@@ -9,7 +9,9 @@
     loadFail: "\u6570\u636e\u52a0\u8f7d\u5931\u8d25",
     saveFirst: "\u8bf7\u5148\u9009\u62e9\u56fe\u7247",
     saved: "\u6807\u6ce8\u5df2\u4fdd\u5b58",
+    completed: "\u5f53\u524d\u56fe\u7247\u5df2\u6807\u6ce8\u5b8c\u6210",
     saveFail: "\u4fdd\u5b58\u5931\u8d25",
+    noUndo: "\u6ca1\u6709\u53ef\u64a4\u9500\u7684\u64cd\u4f5c",
     chooseLabel: "\u9009\u62e9\u6807\u7b7e",
     verified: "\u5df2\u6821\u9a8c",
     unverified: "\u672a\u6821\u9a8c",
@@ -46,10 +48,10 @@
   const selectBtn = document.getElementById("select-mode-btn");
   const deleteBtn = document.getElementById("delete-box-btn");
   const saveBtn = document.getElementById("save-boxes-btn");
+  const completeImageBtn = document.getElementById("complete-image-btn");
+  const undoBtn = document.getElementById("undo-btn");
   const acceptAllBtn = document.getElementById("accept-all-btn");
-  const heatmapToggleBtn = document.getElementById("heatmap-toggle-btn");
   const finishPolygonBtn = document.getElementById("finish-polygon-btn");
-  const heatmap = document.getElementById("uncertainty-heatmap");
   const modeBadge = document.getElementById("mode-badge");
   const labelSelect = document.getElementById("box-label-select");
   const statusFilter = document.getElementById("status-filter");
@@ -84,13 +86,15 @@
   let currentItems = [];
   let currentItemIndex = -1;
   let currentTotalCount = 0;
+  let currentTotalPages = 1;
   let loadedLabels = [];
   let zoomScale = 1;
   let draftPoints = [];
   let draftEl = null;
   let svg = null;
-  let heatmapVisible = false;
   let rectEdit = null;
+  let undoStack = [];
+  let hasUnsavedChanges = false;
 
   function clamp01(value) {
     return Math.max(0, Math.min(1, Number(value) || 0));
@@ -153,6 +157,7 @@
     draftPoints = [];
     removeDraft();
     updateFinishPolygonState();
+    updateUndoState();
     toolButtons.forEach((button) => {
       button.classList.toggle("active", button.dataset.tool === nextTool);
     });
@@ -222,10 +227,6 @@
     layer.setAttribute("height", String(size.height));
     layer.style.width = `${size.width}px`;
     layer.style.height = `${size.height}px`;
-    if (heatmap) {
-      heatmap.style.width = `${size.width}px`;
-      heatmap.style.height = `${size.height}px`;
-    }
   }
 
   function removeDraft() {
@@ -318,6 +319,7 @@
         event.stopPropagation();
         selectShape(shape);
         const bounds = boundsFromPoints(shape.points);
+        pushUndo();
         rectEdit = { shape, handle, bounds };
       });
       el.appendChild(dot);
@@ -418,8 +420,9 @@
     updateShapePanel();
   }
 
-  function setShapeDecision(shape, decision) {
+  function setShapeDecision(shape, decision, record = true) {
     if (!shape) return;
+    if (record) pushUndo();
     shape.decision = decision;
     if (decision === "modified") shape.source = "manual";
     positionShape(shape);
@@ -432,9 +435,12 @@
     shape.decision = shape.decision === "manual" ? "manual" : "modified";
   }
 
-  function renameShape(shape, label) {
+  function renameShape(shape, label, record = true) {
     if (!shape) return;
+    if (record) pushUndo();
     shape.label = label || "";
+    rememberLabel(shape.label);
+    refreshLabelSelectOptions(shape.label);
     markShapeModified(shape);
     if (labelSelect && shape === activeShape) labelSelect.value = shape.label;
     positionShape(shape);
@@ -442,7 +448,15 @@
   }
 
   function removeActiveShape() {
+    if (draftPoints.length) {
+      draftPoints = [];
+      removeDraft();
+      updateFinishPolygonState();
+      updateUndoState();
+      return;
+    }
     if (!activeShape) return;
+    pushUndo();
     const target = activeShape;
     shapes = shapes.filter((shape) => shape !== target);
     target.el?.remove();
@@ -510,6 +524,68 @@
     return payload;
   }
 
+  function shapeState(shape) {
+    const state = {
+      shape_type: shape.shape_type,
+      label: shape.label || "",
+      source: shape.source || "manual",
+      decision: shape.decision || "manual",
+      points: (shape.points || []).map((point) => [clamp01(point[0]), clamp01(point[1])]),
+    };
+    if (shape.confidence !== undefined) state.confidence = shape.confidence;
+    return state;
+  }
+
+  function updateUndoState() {
+    if (undoBtn) undoBtn.disabled = undoStack.length === 0 && draftPoints.length === 0;
+  }
+
+  function pushUndo() {
+    if (!window.currentImageItem) return;
+    undoStack.push(shapes.map(shapeState));
+    if (undoStack.length > 60) undoStack.shift();
+    hasUnsavedChanges = true;
+    updateUndoState();
+  }
+
+  function restoreShapes(snapshot) {
+    shapes.forEach((shape) => {
+      shape.el?.remove();
+      shape.labelEl?.remove();
+    });
+    activeShape = null;
+    draftPoints = [];
+    removeDraft();
+    svg?.remove();
+    svg = null;
+    shapes = snapshot.map((shape) => ({
+      ...shape,
+      points: (shape.points || []).map((point) => [clamp01(point[0]), clamp01(point[1])]),
+    }));
+    shapes.forEach(renderShape);
+    rerenderShapes();
+    selectShape(sortedShapeEntries()[0]?.shape || shapes[0] || null);
+    updateShapePanel();
+  }
+
+  function undoLastStep() {
+    if (draftPoints.length) {
+      draftPoints.pop();
+      renderDraft();
+      updateFinishPolygonState();
+      updateUndoState();
+      return;
+    }
+    const snapshot = undoStack.pop();
+    if (!snapshot) {
+      window.showMessage(TXT.noUndo, "warning");
+      return;
+    }
+    restoreShapes(snapshot);
+    hasUnsavedChanges = true;
+    updateUndoState();
+  }
+
   function renderLabelList() {
     if (!labelListPanel) return;
     if (!loadedLabels.length) {
@@ -532,7 +608,9 @@
         const label = row.dataset.label || "";
         if (labelSelect) labelSelect.value = label;
         if (activeShape) {
+          pushUndo();
           activeShape.label = label;
+          rememberLabel(label);
           if (activeShape.source === "model" && activeShape.decision !== "accepted") {
             activeShape.decision = "modified";
             activeShape.source = "manual";
@@ -543,6 +621,74 @@
         renderLabelList();
       });
     });
+  }
+
+  function rememberLabel(label) {
+    const value = String(label || "").trim();
+    if (!value || loadedLabels.includes(value)) return;
+    loadedLabels.push(value);
+    loadedLabels.sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+  }
+
+  function refreshLabelSelectOptions(selectedValue = null) {
+    if (!labelSelect) return;
+    const currentValue = selectedValue ?? labelSelect.value;
+    labelSelect.innerHTML = `<option value="">${TXT.chooseLabel}</option>`;
+    loadedLabels.forEach((label) => {
+      const option = document.createElement("option");
+      option.value = label;
+      option.textContent = label;
+      labelSelect.appendChild(option);
+    });
+    if (currentValue && loadedLabels.includes(currentValue)) {
+      labelSelect.value = currentValue;
+    } else if (!currentValue && loadedLabels.length) {
+      labelSelect.value = loadedLabels[0];
+    }
+    renderLabelList();
+  }
+
+  function collectLabelsFromShapes(shapeList) {
+    shapeList.forEach((shape) => rememberLabel(shape.label));
+    refreshLabelSelectOptions(labelSelect?.value || shapeList[0]?.label || null);
+  }
+
+  function matchingLabels(searchText) {
+    const keyword = String(searchText || "").trim().toLowerCase();
+    if (!keyword) return [...loadedLabels];
+    return loadedLabels.filter((label) => label.toLowerCase().includes(keyword));
+  }
+
+  function renderInlineLabelSuggestions(input) {
+    const index = input.dataset.labelInput;
+    const list = objectList?.querySelector(`[data-label-suggestions="${index}"]`);
+    if (!list) return;
+    const matches = matchingLabels(input.value);
+    if (!matches.length) {
+      list.innerHTML = `<button type="button" class="det-label-suggestion" disabled>${TXT.noLabel}</button>`;
+      list.classList.add("visible");
+      return;
+    }
+    list.innerHTML = matches
+      .map((label) => `<button type="button" class="det-label-suggestion" data-suggest-label="${escapeHtml(label)}">${escapeHtml(label)}</button>`)
+      .join("");
+    [...list.querySelectorAll("[data-suggest-label]")].forEach((button) => {
+      button.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        const shape = shapes[Number(index)];
+        const label = button.dataset.suggestLabel || "";
+        input.value = label;
+        selectShape(shape);
+        renameShape(shape, label);
+        list.classList.remove("visible");
+      });
+    });
+    list.classList.add("visible");
+  }
+
+  function hideInlineLabelSuggestions(input) {
+    const list = objectList?.querySelector(`[data-label-suggestions="${input.dataset.labelInput}"]`);
+    list?.classList.remove("visible");
   }
 
   function sortedShapeEntries() {
@@ -577,13 +723,6 @@
           const confChip = conf === null
             ? ""
             : `<span class="det-chip ${low}">${TXT.confidence} ${fmt(conf)}</span>`;
-          const labelOptions = [
-            `<option value="">${TXT.chooseLabel}</option>`,
-            ...loadedLabels.map((item) => {
-              const selected = item === shape.label ? "selected" : "";
-              return `<option value="${escapeHtml(item)}" ${selected}>${escapeHtml(item)}</option>`;
-            }),
-          ].join("");
           return `
             <div class="det-object-row ${active}" data-index="${index}">
               <span class="lm-color-dot" style="background:${colorForShape(shape)}"></span>
@@ -600,7 +739,7 @@
               <span class="det-chip">${index + 1}</span>
               <div class="det-label-editor">
                 <input class="det-label-input" data-label-input="${index}" value="${escapeHtml(shape.label || "")}" placeholder="\u8f93\u5165\u6807\u7b7e\u540d">
-                <select class="det-label-select" data-label-select="${index}">${labelOptions}</select>
+                <div class="det-label-suggestions" data-label-suggestions="${index}"></div>
               </div>
               <div class="det-card-actions">
                 <button type="button" class="det-mini-btn accept" data-action="accepted" data-index="${index}">\u63a5\u53d7</button>
@@ -623,6 +762,11 @@
       });
       [...objectList.querySelectorAll("[data-label-input]")].forEach((input) => {
         input.addEventListener("click", (event) => event.stopPropagation());
+        input.addEventListener("focus", () => renderInlineLabelSuggestions(input));
+        input.addEventListener("input", () => renderInlineLabelSuggestions(input));
+        input.addEventListener("blur", () => {
+          window.setTimeout(() => hideInlineLabelSuggestions(input), 120);
+        });
         input.addEventListener("keydown", (event) => {
           event.stopPropagation();
           if (event.key === "Enter") input.blur();
@@ -631,14 +775,6 @@
           const shape = shapes[Number(input.dataset.labelInput)];
           selectShape(shape);
           renameShape(shape, input.value.trim());
-        });
-      });
-      [...objectList.querySelectorAll("[data-label-select]")].forEach((select) => {
-        select.addEventListener("click", (event) => event.stopPropagation());
-        select.addEventListener("change", () => {
-          const shape = shapes[Number(select.dataset.labelSelect)];
-          selectShape(shape);
-          renameShape(shape, select.value);
         });
       });
     }
@@ -654,15 +790,9 @@
       const data = await response.json();
       const apiLabels = Array.isArray(data.labels) ? data.labels : [];
       const taskLabels = Array.isArray(window.detectionTaskLabels) ? window.detectionTaskLabels : [];
-      loadedLabels = Array.from(new Set([...taskLabels, ...apiLabels]))
-        .filter((label) => typeof label === "string" && label.trim());
-      loadedLabels.forEach((label) => {
-        const option = document.createElement("option");
-        option.value = label;
-        option.textContent = label;
-        labelSelect.appendChild(option);
-      });
-      renderLabelList();
+      loadedLabels = [];
+      [...taskLabels, ...apiLabels].forEach(rememberLabel);
+      refreshLabelSelectOptions();
     } catch (error) {
       console.warn("load labels failed", error);
     }
@@ -689,7 +819,6 @@
     if (sampleStrategy) sampleStrategy.textContent = active ? "Entropy / Margin" : "Pseudo Label";
     if (sampleModelVersion) sampleModelVersion.textContent = item?.model_version || item?.algorithm_version || "v1";
     if (samplePriority) samplePriority.textContent = priorityText(uncertainty);
-    if (heatmap) heatmap.style.opacity = String(Math.max(0.18, Math.min(0.5, uncertainty)));
   }
 
   function updateQueueInfo() {
@@ -700,17 +829,21 @@
     const remaining = Math.max(0, total - position);
     const priority = priorityText(currentUncertainty());
     if (queueMeta) {
-      queueMeta.textContent = `${position || "-"} / ${total || "-"} · \u961f\u5217\u4f18\u5148\u7ea7: ${priority} · \u9884\u8ba1\u5269\u4f59: ${remaining} \u5f20`;
+      queueMeta.textContent = `${position || "-"} / ${total || "-"} | \u961f\u5217\u4f18\u5148\u7ea7: ${priority} | \u9884\u8ba1\u5269\u4f59: ${remaining} \u5f20`;
     }
   }
 
   function openImage(item) {
     window.currentImageItem = item;
     currentItemIndex = currentItems.findIndex((candidate) => String(candidate.id) === String(item.id));
+    undoStack = [];
+    hasUnsavedChanges = false;
+    updateUndoState();
     zoomScale = 1;
     imageEl.style.transform = "scale(1)";
     clearOverlays();
     shapes = Array.isArray(item.annotations) ? item.annotations.map((annotation) => annotationToShape(annotation, item)) : [];
+    collectLabelsFromShapes(shapes);
 
     imageEl.src = item.relative_image_url || item.image_url || "";
     currentName.textContent = item.image_name || TXT.unnamed;
@@ -730,7 +863,7 @@
     });
   }
 
-  function renderImageList(items) {
+  function renderImageList(items, preferredItemId = null, preferredIndex = 0) {
     currentItems = items;
     currentItemIndex = -1;
     if (!items.length) {
@@ -766,21 +899,26 @@
       .join("");
 
     [...imageList.querySelectorAll(".det-image-row")].forEach((row, index) => {
-      row.addEventListener("click", () => openImage(items[index]));
+      row.addEventListener("click", () => navigateToImage(items[index]));
     });
-    openImage(items[0]);
+    const preferredItem = preferredItemId
+      ? items.find((item) => String(item.id) === String(preferredItemId))
+      : null;
+    const fallbackIndex = Math.max(0, Math.min(items.length - 1, Number(preferredIndex) || 0));
+    openImage(preferredItem || items[fallbackIndex]);
   }
 
   function renderPager(data) {
     const page = Number(data.page || 1);
     const totalPages = Number(data.total_pages || 1);
+    currentTotalPages = totalPages;
     pager.innerHTML = `
       <button type="button" class="lm-button" id="det-prev-page" ${page <= 1 ? "disabled" : ""}>${TXT.pagePrev}</button>
       <span class="text-xs text-slate-600">${page} / ${totalPages}</span>
       <button type="button" class="lm-button" id="det-next-page" ${page >= totalPages ? "disabled" : ""}>${TXT.pageNext}</button>
     `;
-    document.getElementById("det-prev-page")?.addEventListener("click", () => loadDetectionPage(page - 1));
-    document.getElementById("det-next-page")?.addEventListener("click", () => loadDetectionPage(page + 1));
+    document.getElementById("det-prev-page")?.addEventListener("click", () => navigateToPage(page - 1));
+    document.getElementById("det-next-page")?.addEventListener("click", () => navigateToPage(page + 1));
   }
 
   async function fetchDetectionPage(page = 1) {
@@ -800,13 +938,13 @@
     return response.json();
   }
 
-  async function loadDetectionPage(page = 1) {
+  async function loadDetectionPage(page = 1, preferredItemId = null, preferredIndex = 0) {
     currentPage = Math.max(1, page);
     imageList.innerHTML = `<div class="det-empty">${TXT.loading}</div>`;
     try {
       const data = await fetchDetectionPage(currentPage);
       currentTotalCount = Number(data.total_count || 0);
-      renderImageList(data.results || []);
+      renderImageList(data.results || [], preferredItemId, preferredIndex);
       renderPager(data);
     } catch (error) {
       console.error(error);
@@ -814,30 +952,85 @@
     }
   }
 
+  async function persistShapes(modeOverride = null) {
+    if (!window.currentImageItem) {
+      window.showMessage(TXT.saveFirst, "warning");
+      return null;
+    }
+    const response = await fetch(`/tasks/${taskId}/detection/save/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken": window.getCookie("csrftoken"),
+      },
+      body: JSON.stringify({
+        item_id: window.currentImageItem.id,
+        mode: modeOverride || (isActiveLearningSample() ? "active_learning" : "pre_annotation_check"),
+        annotations: shapes.map(shapeToPayload),
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok || data.status !== "success") {
+      throw new Error(data.message || TXT.saveFail);
+    }
+    undoStack = [];
+    hasUnsavedChanges = false;
+    updateUndoState();
+    return data;
+  }
+
+  async function saveBeforeLeaving() {
+    if (!window.currentImageItem || !hasUnsavedChanges) return true;
+    try {
+      await persistShapes("auto_save");
+      return true;
+    } catch (error) {
+      console.error(error);
+      window.showMessage(error.message || TXT.saveFail, "error");
+      return false;
+    }
+  }
+
+  async function navigateToImage(item) {
+    if (!item || String(item.id) === String(window.currentImageItem?.id)) return;
+    if (!(await saveBeforeLeaving())) return;
+    openImage(item);
+  }
+
+  async function navigateToPage(page) {
+    if (!(await saveBeforeLeaving())) return;
+    await loadDetectionPage(page);
+  }
+
   async function saveShapes() {
+    try {
+      await persistShapes();
+      window.showMessage(TXT.saved, "success");
+      loadDetectionPage(currentPage, window.currentImageItem?.id);
+    } catch (error) {
+      console.error(error);
+      window.showMessage(error.message || TXT.saveFail, "error");
+    }
+  }
+
+  async function completeCurrentImage() {
     if (!window.currentImageItem) {
       window.showMessage(TXT.saveFirst, "warning");
       return;
     }
+    const nextItem = currentItemIndex >= 0 ? currentItems[currentItemIndex + 1] : null;
+    const nextIndex = currentItemIndex >= 0 ? currentItemIndex : 0;
+    const nextPage = nextItem ? currentPage : Math.min(currentPage + 1, currentTotalPages);
     try {
-      const response = await fetch(`/tasks/${taskId}/detection/save/`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-CSRFToken": window.getCookie("csrftoken"),
-        },
-        body: JSON.stringify({
-          item_id: window.currentImageItem.id,
-          mode: isActiveLearningSample() ? "active_learning" : "pre_annotation_check",
-          annotations: shapes.map(shapeToPayload),
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok || data.status !== "success") {
-        throw new Error(data.message || TXT.saveFail);
+      await persistShapes("manual_complete");
+      window.showMessage(TXT.completed, "success");
+      if (nextItem) {
+        await loadDetectionPage(currentPage, nextItem.id, nextIndex);
+      } else if (nextPage !== currentPage) {
+        await loadDetectionPage(nextPage);
+      } else {
+        await loadDetectionPage(currentPage, null, nextIndex);
       }
-      window.showMessage(TXT.saved, "success");
-      loadDetectionPage(currentPage);
     } catch (error) {
       console.error(error);
       window.showMessage(error.message || TXT.saveFail, "error");
@@ -865,6 +1058,7 @@
   }
 
   function addShape(shape) {
+    pushUndo();
     shapes.push({
       source: "manual",
       decision: "manual",
@@ -884,6 +1078,7 @@
     draftPoints = [];
     removeDraft();
     updateFinishPolygonState();
+    updateUndoState();
   }
 
   function finishLine() {
@@ -896,6 +1091,7 @@
     draftPoints = [];
     removeDraft();
     updateFinishPolygonState();
+    updateUndoState();
   }
 
   function updateFinishPolygonState() {
@@ -922,35 +1118,33 @@
   selectBtn?.addEventListener("click", () => setMode("select"));
   deleteBtn?.addEventListener("click", removeActiveShape);
   saveBtn?.addEventListener("click", saveShapes);
+  completeImageBtn?.addEventListener("click", completeCurrentImage);
+  undoBtn?.addEventListener("click", undoLastStep);
   acceptAllBtn?.addEventListener("click", () => {
     if (isActiveLearningSample()) {
       window.showMessage(TXT.acceptAllWarn, "warning");
       return;
     }
+    pushUndo();
     shapes.forEach((shape) => {
       if (shape.source === "model" && shape.decision !== "rejected") shape.decision = "accepted";
       positionShape(shape);
     });
     updateShapePanel();
   });
-  heatmapToggleBtn?.addEventListener("click", () => {
-    heatmapVisible = !heatmapVisible;
-    heatmap?.classList.toggle("visible", heatmapVisible);
-    heatmapToggleBtn.classList.toggle("active", heatmapVisible);
-  });
   prevImageBtn?.addEventListener("click", () => {
-    if (currentItemIndex > 0) openImage(currentItems[currentItemIndex - 1]);
+    if (currentItemIndex > 0) navigateToImage(currentItems[currentItemIndex - 1]);
   });
   nextImageBtn?.addEventListener("click", () => {
     if (currentItemIndex >= 0 && currentItemIndex < currentItems.length - 1) {
-      openImage(currentItems[currentItemIndex + 1]);
+      navigateToImage(currentItems[currentItemIndex + 1]);
     }
   });
   zoomInBtn?.addEventListener("click", () => setZoom(zoomScale * 1.15));
   zoomOutBtn?.addEventListener("click", () => setZoom(zoomScale / 1.15));
   fitWindowBtn?.addEventListener("click", () => setZoom(1));
-  statusFilter?.addEventListener("change", () => loadDetectionPage(1));
-  sortSelect?.addEventListener("change", () => loadDetectionPage(1));
+  statusFilter?.addEventListener("change", () => navigateToPage(1));
+  sortSelect?.addEventListener("change", () => navigateToPage(1));
   window.addEventListener("resize", rerenderShapes);
 
   container?.addEventListener("mousedown", (event) => {
@@ -1048,6 +1242,7 @@
     }
     renderDraft();
     updateFinishPolygonState();
+    updateUndoState();
     if (activeTool === "line" && draftPoints.length >= 2) finishLine();
   });
 
@@ -1063,15 +1258,18 @@
       draftPoints = [];
       removeDraft();
       updateFinishPolygonState();
+      updateUndoState();
     }
     if ((event.key === "Delete" || event.key === "Backspace") && activeShape) removeActiveShape();
     if ((event.key === "a" || event.key === "A") && activeShape) setShapeDecision(activeShape, "accepted");
     if ((event.key === "r" || event.key === "R") && activeShape) setShapeDecision(activeShape, "rejected");
     const labelIndex = Number(event.key) - 1;
     if (labelIndex >= 0 && labelIndex < loadedLabels.length && activeShape) {
+      pushUndo();
       activeShape.label = loadedLabels[labelIndex];
+      rememberLabel(activeShape.label);
       if (labelSelect) labelSelect.value = activeShape.label;
-      setShapeDecision(activeShape, activeShape.source === "model" ? "modified" : activeShape.decision);
+      setShapeDecision(activeShape, activeShape.source === "model" ? "modified" : activeShape.decision, false);
     }
   });
 
@@ -1080,7 +1278,9 @@
       renderLabelList();
       return;
     }
+    pushUndo();
     activeShape.label = labelSelect.value;
+    rememberLabel(activeShape.label);
     if (activeShape.source === "model" && activeShape.decision !== "accepted") {
       activeShape.source = "manual";
       activeShape.decision = "modified";

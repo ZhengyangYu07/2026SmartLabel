@@ -134,7 +134,7 @@ class SSODTrainer(Trainer):
         # Resume
         self.start_epoch = 0
         pretrained = cfg.weights.endswith('.pt')
-        if pretrained:
+        if pretrained and cfg.resume:
             if ckpt['optimizer'] is not None:
                 try:
                     self.optimizer.load_state_dict(ckpt['optimizer'])
@@ -163,6 +163,8 @@ class SSODTrainer(Trainer):
                 self.epochs += ckpt['epoch']  # finetune additional epochs
 
             del ckpt, csd
+        elif pretrained:
+            LOGGER.info('Loaded pretrained model weights as initialization only; optimizer, EMA, and epoch state are not restored.')
         self.epoch = self.start_epoch
         # self.ema.update_decay(self.epoch, self.cfg.hyp.burn_epochs)
         self.model_type = self.model.model_type

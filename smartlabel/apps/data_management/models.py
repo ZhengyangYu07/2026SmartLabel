@@ -19,7 +19,6 @@ class Task(models.Model):
         ('object-detection', '目标检测'),
     )
     LABELING_CHOICES = (
-        ('pre-trained', '预训练'),
         ('semi-supervised', '半监督'),
     )
     user = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -27,7 +26,7 @@ class Task(models.Model):
     name = models.CharField(max_length=100, verbose_name="任务名称")
     description = models.TextField(blank=True, verbose_name="任务描述")
     task_type = models.CharField(max_length=20, choices=TYPE_CHOICES, verbose_name="任务类型")
-    labeling_type = models.CharField(max_length=20, choices=LABELING_CHOICES, verbose_name="标注模式",default="pre-trained")
+    labeling_type = models.CharField(max_length=20, choices=LABELING_CHOICES, verbose_name="标注模式", default="semi-supervised")
     # 文本分类下的场景选择：情感分析 / 主题分类 / 内容审核
     CLASSIFICATION_SCENE_CHOICES = (
         ('sentiment', '情感分析'),
@@ -40,7 +39,7 @@ class Task(models.Model):
     data_file = models.FileField(upload_to='uploads/data/%Y/%m/%d/', verbose_name="数据文件")
     # 用户上传数据时统计的固定总数（上传完成后写入，界面显示为常量）
     uploaded_total = models.PositiveIntegerField(default=0, verbose_name="上传总数")
-    label_list = models.JSONField(default=list, blank=True, verbose_name="标签配置")   # 针对预训练模式
+    label_list = models.JSONField(default=list, blank=True, verbose_name="标签配置")
     label_file = models.FileField(upload_to='uploads/label/%Y/%m/%d/', blank=True, null=True,
                                   verbose_name="标注文件")  # 半监督模式下必填
     extracted_dir = models.CharField(max_length=255, blank=True, null=True, verbose_name="解压文件")

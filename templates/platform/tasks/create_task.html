@@ -112,7 +112,9 @@
           <option value="" disabled selected>请选择您的目标任务</option>
           <option value="image-classification">图像分类</option>
           <option value="text-classification">文本分类</option>
-          <option value="object-detection">目标检测</option>
+          <template x-if="showObjectDetection">
+            <option value="object-detection">目标检测</option>
+          </template>
         </select>
       </div>
 
@@ -209,7 +211,7 @@
                 'label'，分别表示文本内容和标签，每行显示一个样本的标注信息。<br />
                 <strong>示例:</strong> "This is a text...",test
               </p>
-              <p x-show="task_type === 'object-detection'">
+              <p x-show="showObjectDetection && task_type === 'object-detection'">
                 支持 LabelMe 风格的 JSON 或 COCO
                 格式标注压缩包；也可上传一个简单的 CSV/清单用于映射图片到标签。
                 系统会自动从人工标注或界面标注中生成 YOLO 风格的训练标签。
@@ -225,7 +227,7 @@
               type="file"
               name="label_file"
               id="label_file"
-              :accept="task_type === 'object-detection' ? '.json,.csv' : '.csv'"
+              :accept="showObjectDetection && task_type === 'object-detection' ? '.json,.csv' : '.csv'"
               class="absolute inset-0 opacity-0 cursor-pointer"
               @change="labelFileName = $event.target.files.length ? $event.target.files[0].name : ''"
             />
@@ -234,13 +236,13 @@
                 <i class="fas fa-file-import text-3xl text-gray-400 mb-2"></i>
                 <p class="text-gray-500">点击上传标注文件...</p>
                 <p
-                  x-show="task_type !== 'object-detection'"
+                  x-show="!showObjectDetection || task_type !== 'object-detection'"
                   class="text-xs text-gray-400 mt-1"
                 >
                   支持单个 .csv 文件
                 </p>
                 <p
-                  x-show="task_type === 'object-detection'"
+                  x-show="showObjectDetection && task_type === 'object-detection'"
                   class="text-xs text-gray-400 mt-1"
                 >
                   支持 .json（COCO）或
@@ -280,7 +282,7 @@
           </select>
         </div>
 
-        <div x-show="task_type === 'object-detection'" class="mt-4">
+        <div x-show="showObjectDetection && task_type === 'object-detection'" class="mt-4">
           <label class="block text-sm text-gray-600 mb-1">检测算法选择</label>
           <select
             name="model_choice"
@@ -316,7 +318,8 @@
 <script>
   document.addEventListener("alpine:init", () => {
     Alpine.data("createForm", () => ({
-      labeling_type: "pre-trained",
+      labeling_type: "semi-supervised",
+      showObjectDetection: true,
       task_type: "",
       dataFileName: "",
       labelFileName: "",
@@ -439,12 +442,7 @@
           const dataFileInput = document.getElementById("data_file");
           const labelFileInput = document.getElementById("label_file");
 
-          this.labeling_type =
-            labelFileInput && labelFileInput.files.length > 0
-              ? "semi-supervised"
-              : ["image-classification", "text-classification"].includes(this.task_type)
-                ? "semi-supervised"
-                : "pre-trained";
+          this.labeling_type = "semi-supervised";
 
           if (!this.$refs.task_name.value.trim())
             errors.push("任务名称不能为空");
@@ -512,7 +510,7 @@
             this.validationMessageType = "";
             this.dataFileName = "";
             this.labelFileName = "";
-            this.labeling_type = "pre-trained";
+            this.labeling_type = "semi-supervised";
             this.isDataFileValidating = false;
             this.isProcessingOverlayVisible = false;
             this.overlayMessage = "正在处理，请稍候..."; // 提交完成，重置遮罩文本

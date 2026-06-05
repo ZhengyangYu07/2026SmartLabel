@@ -331,8 +331,14 @@
 
     let lastProgress = -1; // 用于避免不必要的DOM更新
     let lastStatus = initialStatus;
+    let completionHandled = false;
 
     const intervalId = setInterval(async () => {
+      if (completionHandled) {
+        clearInterval(intervalId);
+        taskPollingIntervals.delete(taskId);
+        return;
+      }
       try {
         const response = await fetch(`/api/tasks/${taskId}/progress/`);
         if (!response.ok) {
@@ -383,6 +389,7 @@
 
           // 当状态由“进行中”等变为“已完成”时，刷新页面
           if (newStatus === "completed") {
+            completionHandled = true;
             console.log(`任务 ${taskId} 已完成，将刷新页面。`);
             clearInterval(intervalId);
             taskPollingIntervals.delete(taskId);
@@ -415,28 +422,9 @@
           }
         }
 
-        // 当处理进度达到100%时，刷新页面
-        if (newProgress >= 100 && lastStatus !== "completed") {
-          console.log(`任务 ${taskId} 进度已达100%，将刷新页面。`);
-          clearInterval(intervalId);
-          taskPollingIntervals.delete(taskId);
-
-          showMessage(
-            taskCompletionRedirectUrl
-              ? "任务处理完成，正在进入人工标注界面..."
-              : "任务处理完成，正在刷新页面...",
-            "success",
-            2000,
-          );
-          setTimeout(() => {
-            if (taskCompletionRedirectUrl) {
-              location.href = taskCompletionRedirectUrl;
-            } else {
-              location.reload();
-            }
-          }, 1500);
-
-          return; // 终止本次轮询
+        // 进度到 100% 不等于后台真正完成，必须等待 status=completed。
+        if (newProgress >= 100 && !["completed", "failed"].includes(newStatus)) {
+          console.log(`任务 ${taskId} 进度已达100%，等待最终状态确认。`);
         }
 
         // 每次轮询，也更新一下校验进度条

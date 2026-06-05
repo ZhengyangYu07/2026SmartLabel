@@ -83,7 +83,18 @@ class Model(nn.Module):
 
 
     def forward(self, x, augment=False, profile=False, visualize=False):
+        if not hasattr(self, 'backbone') and hasattr(self, 'model'):
+            return self._forward_yolov5_legacy(x, profile, visualize)
         return self._forward_once(x, profile, visualize)  # single-scale inference, train
+
+    def _forward_yolov5_legacy(self, x, profile=False, visualize=False):
+        y = []
+        for m in self.model:
+            if m.f != -1:
+                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]
+            x = m(x)
+            y.append(x if m.i in self.save else None)
+        return x
     
     def _forward_once(self, x, profile=False, visualize=False):
         x = self.backbone(x)
@@ -94,6 +105,13 @@ class Model(nn.Module):
 
     def fuse(self):  # fuse model Conv2d() + BatchNorm2d() layers
         LOGGER.info('Fusing layers... ')
+        if not hasattr(self, 'backbone') and hasattr(self, 'model'):
+            for m in self.model.modules():
+                if isinstance(m, (Conv, DWConv)) and hasattr(m, 'bn'):
+                    m.conv = fuse_conv_and_bn(m.conv, m.bn)
+                    delattr(m, 'bn')
+                    m.forward = m.forward_fuse
+            return self
         for m in self.backbone.modules():
             if isinstance(m, (Conv, DWConv)) and hasattr(m, 'bn'):
                 m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
