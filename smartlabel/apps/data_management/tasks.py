@@ -1,5 +1,4 @@
 import csv
-import glob
 import json
 import logging
 import math
@@ -7,21 +6,19 @@ import os
 import pandas as pd
 import psutil
 import shlex
-import stat
+import shutil
 import subprocess
 import time
-import uuid
 from datetime import datetime, timezone
 from celery import shared_task
 from celery.exceptions import Ignore
 from django.apps import apps
 from django.core.cache import cache
 from django.conf import settings
-from django.core.exceptions import SuspiciousOperation
 from django.db import transaction
-from django.db import models
 from pathlib import Path
 import torch
+from PIL import Image
 from smartlabel.apps.algorithm.object_detection.active_learning import detection_uncertainty
 from .models import Task
 
@@ -185,7 +182,6 @@ def run_subprocess_with_progress(cmd, task_id, total_files=None):
     """
     from celery import current_task
     import re
-    import subprocess
     
     try:
         task_obj = Task.objects.get(id=task_id)
@@ -485,7 +481,6 @@ def process_annotation_task(self, task_id):
             if not has_uploaded_label_file and not has_manual_label_file:
                 def _cold_start_image_uncertainty(image_path):
                     try:
-                        from PIL import Image
                         with Image.open(image_path) as img:
                             gray = img.convert('L').resize((64, 64))
                             histogram = gray.histogram()
@@ -881,7 +876,6 @@ def process_annotation_task(self, task_id):
                                     continue
 
                                 # 使用图片实际尺寸做归一化，避免依赖 CSV 附加宽高字段
-                                from PIL import Image
                                 with Image.open(img_path) as im:
                                     iw, ih = im.size
                                 if iw <= 0 or ih <= 0:
@@ -1134,7 +1128,6 @@ def process_annotation_task(self, task_id):
 
             def _detection_empty_uncertainty(image_path):
                 try:
-                    from PIL import Image
                     with Image.open(image_path) as img:
                         gray = img.convert('L').resize((64, 64))
                         histogram = gray.histogram()
@@ -1246,7 +1239,6 @@ def process_annotation_task(self, task_id):
 
                 pred_dir = Path(result_dir) / 'pred'
                 if pred_dir.exists():
-                    import shutil
                     shutil.rmtree(pred_dir)
                 cmd = [
                     'conda', 'run', '--no-capture-output', '-n', 'efficientteacher', 'python',
@@ -1364,7 +1356,6 @@ def process_annotation_task(self, task_id):
             if not labeled_images:
                 def _cold_start_detection_uncertainty(image_path):
                     try:
-                        from PIL import Image
                         with Image.open(image_path) as img:
                             gray = img.convert('L').resize((64, 64))
                             histogram = gray.histogram()
@@ -1617,7 +1608,6 @@ def process_annotation_task(self, task_id):
             )
             pred_dir = Path(result_dir) / 'pred'
             if pred_dir.exists():
-                import shutil
                 shutil.rmtree(pred_dir)
             run_subprocess_with_progress(detect_cmd, task_id)
 
@@ -1731,7 +1721,6 @@ def process_annotation_task(self, task_id):
                         coco_id_to_label,
                     )
                     if pred_dir.exists():
-                        import shutil
                         shutil.rmtree(pred_dir)
                     fallback_cmd = [
                         'conda', 'run', '--no-capture-output', '-n', 'efficientteacher', 'python',

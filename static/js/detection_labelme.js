@@ -37,6 +37,8 @@
     high: "\u9ad8",
     medium: "\u4e2d",
     low: "\u4f4e",
+    hideAnnotations: "\u9690\u85cf\u6807\u6ce8\u6846",
+    showAnnotations: "\u663e\u793a\u6807\u6ce8\u6846",
     acceptAllWarn: "\u5f53\u524d\u662f\u4e3b\u52a8\u5b66\u4e60\u6837\u672c\uff0c\u4e0d\u5efa\u8bae\u5168\u90e8\u63a5\u53d7\uff0c\u8bf7\u9010\u6846\u5904\u7406\u3002",
   };
 
@@ -73,6 +75,7 @@
   const zoomInBtn = document.getElementById("zoom-in-btn");
   const zoomOutBtn = document.getElementById("zoom-out-btn");
   const fitWindowBtn = document.getElementById("fit-window-btn");
+  const toggleAnnotationsBtn = document.getElementById("toggle-annotations-btn");
   const toolButtons = [...document.querySelectorAll("[data-tool]")];
   const tabButtons = [...document.querySelectorAll(".det-tab")];
 
@@ -95,6 +98,8 @@
   let rectEdit = null;
   let undoStack = [];
   let hasUnsavedChanges = false;
+  let baseImageSize = { width: 0, height: 0 };
+  let annotationsVisible = true;
 
   function clamp01(value) {
     return Math.max(0, Math.min(1, Number(value) || 0));
@@ -164,10 +169,42 @@
   }
 
   function setZoom(nextZoom) {
-    zoomScale = Math.max(0.4, Math.min(3, nextZoom));
-    imageEl.style.transformOrigin = "top left";
-    imageEl.style.transform = `scale(${zoomScale})`;
+    const requestedZoom = Number(nextZoom);
+    zoomScale = Math.max(0.1, Number.isFinite(requestedZoom) ? requestedZoom : 1);
+    if (baseImageSize.width && baseImageSize.height) {
+      imageEl.style.maxWidth = "none";
+      imageEl.style.maxHeight = "none";
+      imageEl.style.width = `${baseImageSize.width * zoomScale}px`;
+      imageEl.style.height = `${baseImageSize.height * zoomScale}px`;
+    }
     rerenderShapes();
+    updateCanvasOverflow();
+    centerCanvas();
+  }
+
+  function setAnnotationsVisible(visible) {
+    annotationsVisible = visible;
+    container?.classList.toggle("annotations-hidden", !annotationsVisible);
+    if (toggleAnnotationsBtn) {
+      toggleAnnotationsBtn.textContent = annotationsVisible ? TXT.hideAnnotations : TXT.showAnnotations;
+    }
+  }
+
+  function updateCanvasOverflow() {
+    const viewport = container?.closest(".lm-canvas-area");
+    if (!viewport) return;
+    const padding = 48;
+    viewport.classList.toggle("canvas-overflow-x", container.offsetWidth + padding > viewport.clientWidth);
+    viewport.classList.toggle("canvas-overflow-y", container.offsetHeight + padding > viewport.clientHeight);
+  }
+
+  function centerCanvas() {
+    const viewport = container?.closest(".lm-canvas-area");
+    if (!viewport) return;
+    window.requestAnimationFrame(() => {
+      viewport.scrollLeft = Math.max(0, (viewport.scrollWidth - viewport.clientWidth) / 2);
+      viewport.scrollTop = Math.max(0, (viewport.scrollHeight - viewport.clientHeight) / 2);
+    });
   }
 
   function colorForLabel(label) {
@@ -190,8 +227,8 @@
 
   function imageSize() {
     return {
-      width: imageEl.clientWidth * zoomScale,
-      height: imageEl.clientHeight * zoomScale,
+      width: imageEl.clientWidth,
+      height: imageEl.clientHeight,
     };
   }
 
@@ -783,8 +820,7 @@
   }
 
   async function loadLabels() {
-    if (!labelSelect) return;
-    labelSelect.innerHTML = `<option value="">${TXT.chooseLabel}</option>`;
+    if (labelSelect) labelSelect.innerHTML = `<option value="">${TXT.chooseLabel}</option>`;
     try {
       const response = await fetch(`/api/tasks/${taskId}/meta_data/`);
       const data = await response.json();
@@ -801,6 +837,10 @@
   function statusLabel(item) {
     const raw = String(item.raw_status || item.status || "").toLowerCase();
     return raw.includes("verified") && !raw.includes("unverified") ? TXT.verified : TXT.unverified;
+  }
+
+  function isLabeledView() {
+    return (window.detectionViewMode || "labeled") === "labeled";
   }
 
   function updateSampleInfo(item) {
@@ -840,7 +880,12 @@
     hasUnsavedChanges = false;
     updateUndoState();
     zoomScale = 1;
-    imageEl.style.transform = "scale(1)";
+    imageEl.style.width = "";
+    imageEl.style.height = "";
+    imageEl.style.maxWidth = "";
+    imageEl.style.maxHeight = "";
+    baseImageSize = { width: 0, height: 0 };
+    setAnnotationsVisible(true);
     clearOverlays();
     shapes = Array.isArray(item.annotations) ? item.annotations.map((annotation) => annotationToShape(annotation, item)) : [];
     collectLabelsFromShapes(shapes);
@@ -852,10 +897,20 @@
     updateQueueInfo();
 
     imageEl.onload = () => {
+      imageEl.style.width = "";
+      imageEl.style.height = "";
+      imageEl.style.maxWidth = "";
+      imageEl.style.maxHeight = "";
+      baseImageSize = {
+        width: imageEl.clientWidth,
+        height: imageEl.clientHeight,
+      };
+      setZoom(1);
       shapes.forEach(renderShape);
       rerenderShapes();
       selectShape(sortedShapeEntries()[0]?.shape || shapes[0] || null);
       updateShapePanel();
+      centerCanvas();
     };
 
     [...imageList.querySelectorAll(".det-image-row")].forEach((row) => {
@@ -883,13 +938,16 @@
         const hotClass = uncertainty >= ACTIVE_UNCERTAINTY ? "hot" : "ok";
         const annotationCount = Array.isArray(item.annotations) ? item.annotations.length : 0;
         const name = escapeHtml(item.image_name || TXT.image);
+        const uncertaintyChip = isLabeledView()
+          ? ""
+          : `<span class="det-chip ${hotClass}">${TXT.uncertainty} ${fmt(uncertainty)}</span>`;
         return `
           <button type="button" class="det-image-row" data-item-id="${item.id}">
             ${url ? `<img src="${escapeHtml(url)}" alt="${name}">` : '<div class="bg-gray-100 border"></div>'}
             <span class="min-w-0">
               <span class="det-name">${name}</span>
               <span class="det-meta">
-                <span class="det-chip ${hotClass}">${TXT.uncertainty} ${fmt(uncertainty)}</span>
+                ${uncertaintyChip}
                 <span class="det-chip">${annotationCount} ${TXT.shape}</span>
                 <span class="det-chip">${statusLabel(item)}</span>
               </span>
@@ -925,10 +983,13 @@
     const params = new URLSearchParams({ page: String(page), page_size: "12" });
     const viewMode = window.detectionViewMode || "labeled";
     if (viewMode === "labeled") params.set("labeled_only", "1");
-    if (viewMode === "manual" || viewMode === "unlabeled") params.set("predicted_only", "1");
-
-    const statusValue = statusFilter?.value || "all";
-    if (statusValue !== "all") params.set("status", statusValue);
+    if (viewMode === "manual" || viewMode === "unlabeled") {
+      params.set("predicted_only", "1");
+      params.set("status", "unverified");
+    } else {
+      const statusValue = statusFilter?.value || "all";
+      if (statusValue !== "all") params.set("status", statusValue);
+    }
 
     const sortValue = sortSelect?.value || "uncertainty:desc";
     if (sortValue) params.set("sort", sortValue);
@@ -949,6 +1010,15 @@
     } catch (error) {
       console.error(error);
       imageList.innerHTML = `<div class="det-empty text-red-600">${TXT.loadFail}</div>`;
+    }
+  }
+
+  async function refreshTaskStats() {
+    if (typeof window.refreshTaskStatistics !== "function") return;
+    try {
+      await window.refreshTaskStatistics(taskId);
+    } catch (error) {
+      console.warn("refresh task stats failed", error);
     }
   }
 
@@ -1023,6 +1093,7 @@
     const nextPage = nextItem ? currentPage : Math.min(currentPage + 1, currentTotalPages);
     try {
       await persistShapes("manual_complete");
+      await refreshTaskStats();
       window.showMessage(TXT.completed, "success");
       if (nextItem) {
         await loadDetectionPage(currentPage, nextItem.id, nextIndex);
@@ -1132,20 +1203,34 @@
     });
     updateShapePanel();
   });
-  prevImageBtn?.addEventListener("click", () => {
-    if (currentItemIndex > 0) navigateToImage(currentItems[currentItemIndex - 1]);
+  prevImageBtn?.addEventListener("click", async () => {
+    if (currentItemIndex > 0) {
+      navigateToImage(currentItems[currentItemIndex - 1]);
+      return;
+    }
+    if (currentItemIndex === 0 && currentPage > 1) {
+      if (!(await saveBeforeLeaving())) return;
+      await loadDetectionPage(currentPage - 1, null, 11);
+    }
   });
-  nextImageBtn?.addEventListener("click", () => {
+  nextImageBtn?.addEventListener("click", async () => {
     if (currentItemIndex >= 0 && currentItemIndex < currentItems.length - 1) {
       navigateToImage(currentItems[currentItemIndex + 1]);
+      return;
+    }
+    if (currentItemIndex >= 0 && currentPage < currentTotalPages) {
+      if (!(await saveBeforeLeaving())) return;
+      await loadDetectionPage(currentPage + 1, null, 0);
     }
   });
   zoomInBtn?.addEventListener("click", () => setZoom(zoomScale * 1.15));
   zoomOutBtn?.addEventListener("click", () => setZoom(zoomScale / 1.15));
   fitWindowBtn?.addEventListener("click", () => setZoom(1));
+  toggleAnnotationsBtn?.addEventListener("click", () => setAnnotationsVisible(!annotationsVisible));
   statusFilter?.addEventListener("change", () => navigateToPage(1));
   sortSelect?.addEventListener("change", () => navigateToPage(1));
   window.addEventListener("resize", rerenderShapes);
+  window.addEventListener("resize", updateCanvasOverflow);
 
   container?.addEventListener("mousedown", (event) => {
     if (mode !== "draw" || activeTool !== "rectangle" || !window.currentImageItem) return;

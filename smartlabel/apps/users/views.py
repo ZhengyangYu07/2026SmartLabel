@@ -2,7 +2,6 @@ from django.contrib import messages
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.models import User
 from django.shortcuts import render, redirect
-from django.contrib.auth.hashers import check_password
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth import update_session_auth_hash
 
@@ -12,10 +11,6 @@ def welcome(request):
 
 
 def user_login(request):
-    # # 已登录用户直接跳转首页
-    # if request.user.is_authenticated:
-    #     return redirect('homepage')
-
     if request.method == 'POST':
         username = request.POST.get('username', '').strip()
         password = request.POST.get('password', '').strip()
@@ -107,8 +102,6 @@ def homepage(request):
 
 
 #######################################################################################################################
-# ID        User           Introduction
-# 0         Horevl         First commit, init user_guide logic
 def user_guide_introduction(request):
     return render(request, 'documentation/user_guide_introduction.html')
 
@@ -162,7 +155,6 @@ def profile(request):
 @login_required
 def change_password(request):
     if request.method == 'POST':
-        print("=== 收到 POST 请求 ===")  # 打印调试
         old_password = request.POST.get('old_password')
         new_password1 = request.POST.get('new_password1')
         new_password2 = request.POST.get('new_password2')
@@ -170,7 +162,6 @@ def change_password(request):
 
         # 检查旧密码是否正确
         if not user.check_password(old_password):
-            print("旧密码错误！")  # 打印
             return render(request, 'platform/accounts/change_password.html', {
                 'error_message': '旧密码错误，请重新输入。'
             })
@@ -209,9 +200,7 @@ def feedback(request):
 
 def submit_feedback(request):
     if request.method == 'POST':
-        feedback = request.POST.get('feedback')
         # 你可以将反馈保存到数据库，或发送邮件等
-        print("用户反馈内容：", feedback)
         messages.success(request, '感谢您的反馈！')
         return redirect('feedback')  # 返回原反馈页面
     return render(request, "platform/accounts/feedback.html")  # 渲染原页面

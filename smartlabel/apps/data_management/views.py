@@ -4,7 +4,6 @@ import hashlib
 import logging
 import os
 import shutil
-import signal
 import uuid
 import zipfile
 # 引入处理 .rar 和 .7z 的库
@@ -14,34 +13,29 @@ import io      # 用于内存文件操作
 from pathlib import Path
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import ValidationError, PermissionDenied
+from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator, EmptyPage
 from django.core.cache import cache
-from django.db.models import F, Case, When, Value, Q, Count, FloatField, Exists, OuterRef, BooleanField
+from django.db.models import F, Case, When, Value, Q, FloatField, Exists, OuterRef
 from django.http import JsonResponse, HttpResponse, FileResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.shortcuts import render
-from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods, require_POST
 from io import StringIO
 from kombu.utils import json
-from pathlib import Path
 from PIL import Image
 from django.db.models.functions import Lower
-from django.db import transaction
 from functools import reduce
 import operator
 import urllib.parse
 from redis import Redis
-from django.urls import reverse
 
 # 从现有Celery配置导入
 from celery import current_app as celery_app
 from celery.exceptions import OperationalError
 
 from .models import Task, ImageResult, TextResult, FavoriteTask
-from .utils import process
 from .utils.config import TASK_CONFIG, TaskService
 
 logger = logging.getLogger(__name__)
@@ -556,9 +550,9 @@ def submit_task(request):
                 with open(label_file_path, "wb+") as destination:
                     for chunk in label_file.chunks():
                         destination.write(chunk)
-                print(f"File saved successfully at {label_file_path}") # 调试信息
+                logger.info("标注文件已保存: %s", label_file_path)
             except Exception as e:
-                print(f"Error saving file: {e}") # 调试信息
+                logger.warning("保存标注文件失败: %s", e)
 
         # 启动Celery任务时传递任务类型
         try:
@@ -972,21 +966,18 @@ def task_operation(request, task_id):
         # 清理解压目录
         extracted_dir = Path(settings.MEDIA_ROOT) / 'extracted' / str(task_id)
         if extracted_dir.exists():
-            import shutil
             shutil.rmtree(extracted_dir)
             logger.info(f"已删除解压目录: {extracted_dir}")
 
         # 清除标签目录
         label_dir = Path(settings.MEDIA_ROOT) / 'extracted' / (str(task_id) + '_label')
         if label_dir.exists():
-            import shutil
             shutil.rmtree(label_dir)
             logger.info(f"已删除标签目录: {label_dir}")
 
         # 删除结果文件
         results_dir = Path(settings.MEDIA_ROOT) / 'results' / str(task_id)
         if results_dir.exists():
-            import shutil
             shutil.rmtree(results_dir)
             logger.info(f"已删除结果目录: {results_dir}")
 
@@ -2160,128 +2151,3 @@ def get_favorite_status(request, task_id):
         task=task
     ).exists()
     return JsonResponse({'is_favorite': is_favorite})
-
-
-@csrf_exempt
-@require_POST
-def confirm_denoise(request, task_id):
-    """
-    接收前端去噪确认请求，批量更新对应项的标签和状态。
-    只会更新非人工标注（confidence != -1）的样本。
-    """
-    try:
-        data = json.loads(request.body)
-        logger.info(f"Denoise confirmation request for task {task_id}: {len(data)} items")
-
-        if not isinstance(data, list):
-            return JsonResponse({'status': 'error', 'message': '请求体格式错误，需要一个JSON数组'}, status=400)
-
-        task_obj = get_object_or_404(Task, id=task_id)
-        TaskService.validate_ownership(task_obj, request.user)
-
-        config = TASK_CONFIG[task_obj.task_type]
-        result_model = config['result_model']
-
-        success_count = 0
-        total_attempted = 0
-
-        with transaction.atomic():
-            for item_data in data:
-                # 检查 item_data 结构，防止无效请求
-                if not isinstance(item_data, dict) or 'id' not in item_data or 'label' not in item_data or 'status' not in item_data:
-                    logger.warning(f"跳过无效的去噪项数据: {item_data}")
-                    continue
-
-                total_attempted += 1
-                try:
-                    obj = result_model.objects.get(id=item_data['id'])
-
-                    # **核心逻辑：确保去噪结果的确认只作用于非人工标注的样本**
-                    if obj.confidence == -1:
-                        logger.warning(f"Item {item_data['id']} 是人工标注样本 (confidence=-1)，跳过其去噪结果确认。")
-                        continue
-
-                    # 将前端传入的中文状态映射为后端数据库期望的英文状态
-                    target_status_en = STATUS_MAP_FRONTEND_TO_DB.get(item_data['status'])
-                    if not target_status_en or target_status_en not in ['verified', 'unverified']:
-                        logger.warning(f"Item {item_data['id']} 目标状态无效或未映射: {item_data['status']}")
-                        continue # 跳过无效状态
-
-                    # 如果标签和状态都未改变，则不进行实际的数据库更新
-                    if obj.label == item_data['label'] and obj.status == target_status_en:
-                        logger.debug(f"Item {item_data['id']} 标签和状态未变化，跳过更新。")
-                        success_count += 1 # 视为成功处理，因为无需改变
-                        continue
-
-                    obj.label = item_data['label']
-                    obj.status = target_status_en
-                    obj.save()
-                    success_count += 1
-                    logger.debug(f"成功更新 Item {item_data['id']} 至标签: {obj.label}, 状态: {obj.status}")
-
-                except result_model.DoesNotExist:
-                    logger.warning(f"Item ID = {item_data['id']} 不存在，跳过。")
-                except Exception as e:
-                    logger.error(f"处理去噪项 {item_data.get('id', 'N/A')} 时发生错误: {e}", exc_info=True)
-                    # 继续处理下一个，不中断事务
-                    # 这里也可以选择回滚整个事务并返回错误，取决于业务需求
-                    # 如果希望即使有一个失败也继续，则不raise，并在catch中处理日志
-                    pass # 这里的 pass 表示捕获异常但不重新抛出，继续循环
-
-        return JsonResponse({
-            'status': 'success',
-            'message': f'成功应用了 {success_count} / {total_attempted} 条去噪结果。'
-        })
-    except json.JSONDecodeError:
-        logger.error("Denoise confirmation: Invalid JSON in request body.")
-        return JsonResponse({'status': 'error', 'message': '无效的JSON格式'}, status=400)
-    except Task.DoesNotExist:
-        return JsonResponse({'status': 'error', 'message': '任务不存在'}, status=404)
-    except PermissionDenied as e:
-        logger.warning(f"Denoise confirmation: Permission denied for user {request.user.id} on task {task_id}.")
-        return JsonResponse({'status': 'error', 'message': str(e)}, status=403)
-    except Exception as e:
-        logger.exception("Unexpected error during denoise confirmation.") # 使用 exception 记录完整堆栈
-        return JsonResponse({'status': 'error', 'message': f'服务器内部错误: {str(e)}'}, status=500)
-
-
-# 新增一个智能去噪的模拟API，实际应该调用您的模型去噪逻辑
-@login_required
-@require_POST
-def perform_denoise(request, task_id): 
-    """
-    触发一个异步的智能去噪任务，让前端轮询任务状态并等待去噪结果。
-    """
-    # task_id 现在是整数，可以直接使用
-    task = get_object_or_404(Task, id=task_id)
-    TaskService.validate_ownership(task, request.user)
-
-    config = TASK_CONFIG[task.task_type]
-    result_model = config['result_model']
-    relation_field = config['relation_field']
-
-    try:
-        # 简单模拟去噪逻辑：查找非人工标注且置信度较低的项作为“噪声”
-        # 实际应替换为您的AI模型去噪逻辑
-        potential_noise_items = result_model.objects.filter(
-            **{relation_field: task}
-        ).exclude(confidence=-1).filter(confidence__lt=0.7).order_by('confidence')[:20] # 假设取20个低置信度项
-
-        denoised_suggestions = []
-        for item in potential_noise_items:
-            # 模拟一个“去噪建议”标签，例如在原标签前加“修正_”
-            # 真实情况可能需要更复杂的逻辑或模型的建议标签
-            suggested_label = f"修正_{item.label}" if item.label else "修正_未知标签"
-            denoised_suggestions.append({
-                'id': str(item.id), # 注意：这里 ID 依然需要是字符串，因为可能是 UUID Field
-                'new_label': suggested_label
-            })
-
-        return JsonResponse({
-            'status': 'success',
-            'message': '智能去噪分析完成。',
-            'denoised_suggestions': denoised_suggestions
-        })
-    except Exception as e:
-        logger.error(f"执行智能去噪时出错: {e}", exc_info=True)
-        return JsonResponse({'status': 'error', 'message': f'服务器内部错误: {str(e)}'}, status=500)
