@@ -5,9 +5,11 @@ import math
 import os
 import pandas as pd
 import psutil
+import queue
 import shlex
 import shutil
 import subprocess
+import threading
 import time
 from datetime import datetime, timezone
 from celery import shared_task
@@ -19,8 +21,16 @@ from django.db import transaction
 from pathlib import Path
 import torch
 from PIL import Image
-from smartlabel.apps.algorithm.object_detection.active_learning import detection_uncertainty
+from smartlabel.apps.algorithm.object_detection.active_learning import (
+    build_detection_review_context,
+    detection_review_value_detail,
+)
 from .models import Task
+from .services.detection_loop import (
+    get_next_queue_version,
+    merge_positive_index_context,
+    persist_review_queue_items,
+)
 
 MIN_UPDATE_INTERVAL = 0.5
 logger = logging.getLogger(__name__)
@@ -54,6 +64,7 @@ DETECTION_LABEL_ALIASES = {
     '车辆': 'car',
     '飞机': 'airplane',
 }
+DETECTION_PLACEHOLDER_LABEL = 'obj'
 DETECTION_COCO_CLASS_INDEX = {
     'person': 0,
     'bicycle': 1,
@@ -79,6 +90,14 @@ def _resolve_text_classification_bert_model():
 
 def _heartbeat_cache_key(task_id):
     return f"task:{task_id}:algo_heartbeat"
+
+
+def _remove_detection_placeholder_label(labels):
+    label_list = [str(label or '').strip() for label in labels if str(label or '').strip()]
+    has_real_label = any(label != DETECTION_PLACEHOLDER_LABEL for label in label_list)
+    if not has_real_label:
+        return label_list
+    return [label for label in label_list if label != DETECTION_PLACEHOLDER_LABEL]
 
 
 def _set_algorithm_heartbeat(task_id, line):
@@ -173,12 +192,13 @@ def create_progress_tracker(task, task_id, self=None):
     return update_progress
 
 
-def run_subprocess_with_progress(cmd, task_id, total_files=None):
+def run_subprocess_with_progress(cmd, task_id, total_files=None, progress_start=0, progress_end=100):
     """
     运行子进程并解析输出中的进度信息，更新任务进度。
     支持两种模式：
     1. 如果提供了 total_files，则会匹配 "正在处理" 等关键词来计算进度。
     2. 如果未提供 total_files，则会匹配 "处理进度: xx%" 来获取进度。
+    进度可映射到指定区间，避免子步骤完成时把整个任务直接推进到 100%。
     """
     from celery import current_task
     import re
@@ -194,22 +214,56 @@ def run_subprocess_with_progress(cmd, task_id, total_files=None):
             text=True, 
             bufsize=1,
             encoding='utf-8', # 明确指定编码
-            errors='replace'   # 替换无法解码的字符
+            errors='replace',   # 替换无法解码的字符
+            env={**os.environ, 'PYTHONUNBUFFERED': '1'},
         )
         
+        progress_start = int(max(0, min(progress_start, 99)))
+        progress_end = int(max(progress_start, min(progress_end, 99)))
+
+        def _stage_progress(raw_progress):
+            raw_progress = max(0.0, min(float(raw_progress), 100.0))
+            return int(progress_start + (raw_progress / 100.0) * (progress_end - progress_start))
+
         # --- 模式B：基于百分比的正则 ---
         progress_pattern = re.compile(r'处理进度: (\d+)%')
+        epoch_progress_pattern = re.compile(r'\b(?:Epoch|epoch)\s+(\d{1,4})/(\d{1,4})(?:\s|$)')
         
         # --- 模式A：基于文件计数的正则 ---
-        file_progress_pattern = re.compile(r'Processing image:|正在处理图像:') 
+        file_progress_pattern = re.compile(r'Processing image:|正在处理图像:|\bDone\.') 
 
-        current_progress = 0
+        current_progress = int(task_obj.progress or 0)
         processed_files = 0
+        output_queue = queue.Queue()
+        subprocess_started_at = time.time()
+        last_synthetic_update_at = subprocess_started_at
         
-        # 定义一个标志，指示当前行是否已被“有效”处理过，避免重复记录
-        line_processed_as_progress = False
+        def _save_subprocess_progress(progress, reason, source_line=''):
+            nonlocal current_progress, task_obj
+            progress = int(max(0, min(progress, 100)))
+            if progress <= current_progress:
+                return False
+            current_progress = progress
+            task_obj.progress = progress
+            task_obj.save(update_fields=['progress'])
+            if current_task:
+                current_task.update_state(state='PROGRESS', meta={'progress': progress})
+            if source_line:
+                logger.info(f"子进程输出 ({reason}): {source_line}")
+            else:
+                logger.info("子进程运行中，阶段进度推进到 %s%%", progress)
+            return True
 
-        for line in iter(process.stdout.readline, ''):
+        def _read_subprocess_output():
+            for output_line in iter(process.stdout.readline, ''):
+                output_queue.put(output_line)
+
+        output_thread = threading.Thread(target=_read_subprocess_output, daemon=True)
+        output_thread.start()
+
+        def _handle_subprocess_line(line):
+            nonlocal processed_files
+            line_processed_as_progress = False
             stripped_line = line.strip()
             safe_line = stripped_line.replace('\ufffd', '?')
             if safe_line:
@@ -219,43 +273,69 @@ def run_subprocess_with_progress(cmd, task_id, total_files=None):
             match_percent = progress_pattern.search(safe_line)
             if match_percent:
                 try:
-                    progress = int(match_percent.group(1))
-                    progress = max(0, min(progress, 100))
+                    progress = _stage_progress(int(match_percent.group(1)))
                     
-                    if progress > current_progress:
-                        current_progress = progress
-                        task_obj.progress = progress
-                        task_obj.save(update_fields=['progress'])
-                        if current_task:
-                            current_task.update_state(state='PROGRESS', meta={'progress': progress})
-                        logger.info(f"子进程输出 (进度更新): {safe_line}") # 仅在更新进度时记录一次
-                        line_processed_as_progress = True # 标记此行已用于进度更新
+                    line_processed_as_progress = _save_subprocess_progress(
+                        progress,
+                        '进度更新',
+                        safe_line,
+                    )
                 except (ValueError, TypeError) as e:
                     logger.error(f"解析进度百分比时出错: {str(e)}")
-                continue # 匹配到百分比后，不再进行其他模式匹配
+                return
+
+            match_epoch = epoch_progress_pattern.search(safe_line)
+            if match_epoch:
+                try:
+                    current_epoch = int(match_epoch.group(1))
+                    max_epoch = int(match_epoch.group(2))
+                    if max_epoch > 0 and current_epoch <= max_epoch:
+                        progress = _stage_progress(((current_epoch + 1) / (max_epoch + 1)) * 100)
+                        line_processed_as_progress = _save_subprocess_progress(
+                            progress,
+                            'epoch进度更新',
+                            safe_line,
+                        )
+                except (ValueError, TypeError) as e:
+                    logger.error(f"解析epoch进度时出错: {str(e)}")
+                return
 
             # --- 如果模式B未匹配，且 total_files 有效，则尝试模式A (文件计数) ---
             if total_files and total_files > 0:
                 match_file = file_progress_pattern.search(safe_line)
                 if match_file:
                     processed_files += 1
-                    progress = int((processed_files / total_files) * 100)
-                    progress = max(0, min(progress, 99)) # 文件计数最高到99%，最后由完成逻辑置100
+                    raw_progress = min((processed_files / total_files) * 100, 99)
+                    progress = _stage_progress(raw_progress)
                     
-                    if progress > current_progress:
-                        current_progress = progress
-                        task_obj.progress = progress
-                        task_obj.save(update_fields=['progress'])
-                        if current_task:
-                            current_task.update_state(state='PROGRESS', meta={'progress': progress})
-                        logger.info(f"子进程输出 (文件计数更新): {safe_line}") # 仅在更新进度时记录一次
-                        line_processed_as_progress = True # 标记此行已用于进度更新
-                    continue # 匹配到文件后，不再进行其他模式匹配
+                    line_processed_as_progress = _save_subprocess_progress(
+                        progress,
+                        '文件计数更新',
+                        safe_line,
+                    )
+                    return
                     
             # 如果以上两种进度模式都未匹配，则按通用信息记录一次
             if not line_processed_as_progress:
                 logger.info(f"子进程输出: {safe_line}") 
-            line_processed_as_progress = False # 重置标志，为下一行准备
+
+        while process.poll() is None or not output_queue.empty():
+            try:
+                line = output_queue.get(timeout=0.5)
+                _handle_subprocess_line(line)
+                continue
+            except queue.Empty:
+                pass
+
+            now = time.time()
+            if progress_end > progress_start and now - last_synthetic_update_at >= 2:
+                elapsed = now - subprocess_started_at
+                synthetic_progress = min(
+                    progress_end - 1,
+                    progress_start + max(1, int(elapsed // 3)),
+                )
+                _save_subprocess_progress(synthetic_progress, '计时推进')
+                last_synthetic_update_at = now
 
         return_code = process.wait()
         
@@ -263,12 +343,12 @@ def run_subprocess_with_progress(cmd, task_id, total_files=None):
             logger.error(f"子进程返回非零状态码: {return_code}")
             raise subprocess.CalledProcessError(return_code, cmd, output=None, stderr="subprocess exited with non-zero code")
         
-        # 确保任务进度在成功后为100%
-        if task_obj.progress < 100:
-            task_obj.progress = 100
+        # 确保子步骤成功后推进到该阶段末端，整体任务完成由外层逻辑置 100。
+        if task_obj.progress < progress_end:
+            task_obj.progress = progress_end
             task_obj.save(update_fields=['progress'])
             if current_task:
-                current_task.update_state(state='PROGRESS', meta={'progress': 100})
+                current_task.update_state(state='PROGRESS', meta={'progress': progress_end})
 
         _set_algorithm_heartbeat(task_id, 'subprocess_finished')
         
@@ -586,7 +666,12 @@ def process_annotation_task(self, task_id):
 
             # 算法主流程开始，进度先推进到20
             _update_task_progress(task, 20, self)
-            run_subprocess_with_progress(cmd, task_id)
+            run_subprocess_with_progress(
+                cmd,
+                task_id,
+                progress_start=20,
+                progress_end=80,
+            )
 
             # 子进程结束，推进到80，后续由结果落库推进到100
             _update_task_progress(task, 80, self)
@@ -754,11 +839,15 @@ def process_annotation_task(self, task_id):
 
                 logger.info(f"执行命令: {' '.join(shlex.quote(s) for s in cmd)}")
                 _update_task_progress(task, 30, self)
-                run_subprocess_with_progress(cmd, task_id)
+                run_subprocess_with_progress(
+                    cmd,
+                    task_id,
+                    progress_start=30,
+                    progress_end=85,
+                )
                 _update_task_progress(task, 80, self)
 
                 task.refresh_from_db()
-                update_progress(98, 100)
 
                 if not result_file_path.exists():
                     raise FileNotFoundError(f"文本分类结果文件不存在: {result_file_path}")
@@ -779,14 +868,108 @@ def process_annotation_task(self, task_id):
             ImageResult = apps.get_model('data_management', 'ImageResult')
             labeled_map = {}
             external_label_loaded = False
+            declared_class_names = set()
 
             image_by_name = {p.name: p for p in image_files}
 
             def _canonical_detection_label(label):
                 label_text = str(label or '').strip()
                 if not label_text:
-                    return 'obj'
+                    return DETECTION_PLACEHOLDER_LABEL
                 return DETECTION_LABEL_ALIASES.get(label_text, label_text)
+
+            def _default_detection_label():
+                task_labels = _remove_detection_placeholder_label(
+                    [_canonical_detection_label(label) for label in (task.label_list or [])]
+                    + list(declared_class_names)
+                )
+                if len(task_labels) == 1:
+                    return task_labels[0]
+                return DETECTION_PLACEHOLDER_LABEL
+
+            def _normalize_detection_xyxy(xmin, ymin, xmax, ymax, image_width, image_height):
+                if xmax <= xmin or ymax <= ymin or image_width <= 0 or image_height <= 0:
+                    return None
+
+                values = [xmin, ymin, xmax, ymax]
+                if all(0.0 <= value <= 1.0 for value in values):
+                    x = (xmin + xmax) / 2.0
+                    y = (ymin + ymax) / 2.0
+                    w = xmax - xmin
+                    h = ymax - ymin
+                else:
+                    x = (xmin + xmax) / 2.0 / image_width
+                    y = (ymin + ymax) / 2.0 / image_height
+                    w = (xmax - xmin) / image_width
+                    h = (ymax - ymin) / image_height
+
+                if w <= 0 or h <= 0:
+                    return None
+                return {
+                    'x': max(0.0, min(1.0, x)),
+                    'y': max(0.0, min(1.0, y)),
+                    'w': max(0.0, min(1.0, w)),
+                    'h': max(0.0, min(1.0, h)),
+                }
+
+            def _bounds_to_detection_boxes(raw_bounds, image_width, image_height):
+                if raw_bounds in (None, ''):
+                    return []
+                parts = str(raw_bounds).replace(',', ' ').split()
+                try:
+                    values = [float(part) for part in parts]
+                except (TypeError, ValueError):
+                    return []
+
+                boxes = []
+                for index in range(0, len(values) - 3, 4):
+                    box = _normalize_detection_xyxy(
+                        values[index],
+                        values[index + 1],
+                        values[index + 2],
+                        values[index + 3],
+                        image_width,
+                        image_height,
+                    )
+                    if box:
+                        boxes.append(box)
+                return boxes
+
+            def _detection_box_xyxy(box):
+                x = float(box.get('x', 0))
+                y = float(box.get('y', 0))
+                w = float(box.get('w', 0))
+                h = float(box.get('h', 0))
+                return (
+                    max(0.0, x - w / 2.0),
+                    max(0.0, y - h / 2.0),
+                    min(1.0, x + w / 2.0),
+                    min(1.0, y + h / 2.0),
+                )
+
+            def _detection_box_iou(left, right):
+                lx1, ly1, lx2, ly2 = _detection_box_xyxy(left)
+                rx1, ry1, rx2, ry2 = _detection_box_xyxy(right)
+                inter_w = max(0.0, min(lx2, rx2) - max(lx1, rx1))
+                inter_h = max(0.0, min(ly2, ry2) - max(ly1, ry1))
+                inter_area = inter_w * inter_h
+                left_area = max(0.0, lx2 - lx1) * max(0.0, ly2 - ly1)
+                right_area = max(0.0, rx2 - rx1) * max(0.0, ry2 - ry1)
+                union_area = left_area + right_area - inter_area
+                return inter_area / union_area if union_area > 0 else 0.0
+
+            def _dedupe_detection_boxes(boxes, iou_threshold=0.9):
+                deduped = []
+                for box in boxes or []:
+                    label = str(box.get('label') or '').strip()
+                    if any(
+                        str(kept.get('label') or '').strip() == label
+                        and _detection_box_iou(box, kept) >= iou_threshold
+                        for kept in deduped
+                    ):
+                        continue
+                    deduped.append(box)
+                return deduped
 
             def _append_coco_annotations(coco_data):
                 categories = {
@@ -794,6 +977,7 @@ def process_annotation_task(self, task_id):
                     for c in coco_data.get('categories', [])
                     if c.get('id') is not None
                 }
+                declared_class_names.update(name for name in categories.values() if name)
                 images_meta = {
                     int(img.get('id')): img
                     for img in coco_data.get('images', [])
@@ -842,6 +1026,64 @@ def process_annotation_task(self, task_id):
                         'h': max(0.0, min(1.0, hn)),
                     })
 
+            def _append_csv_annotations(csv_file_path):
+                loaded_csv_boxes = 0
+                with open(csv_file_path, 'r', encoding='utf-8', newline='') as cf:
+                    reader = csv.DictReader(cf)
+                    for row in reader:
+                        raw_label = (row.get('class') or row.get('label') or row.get('name') or row.get('category') or '').strip()
+                        if raw_label:
+                            declared_class_names.add(_canonical_detection_label(raw_label))
+                        fname = (row.get('filename') or row.get('image') or row.get('image_name') or '').strip()
+                        if not fname:
+                            continue
+                        img_name = Path(fname).name
+                        img_path = image_by_name.get(img_name)
+                        if not img_path:
+                            continue
+
+                        with Image.open(img_path) as im:
+                            iw, ih = im.size
+                        if iw <= 0 or ih <= 0:
+                            continue
+
+                        if row.get('bounds'):
+                            boxes = _bounds_to_detection_boxes(row.get('bounds'), iw, ih)
+                        else:
+                            try:
+                                boxes = [
+                                    _normalize_detection_xyxy(
+                                        float(row.get('xmin', '')),
+                                        float(row.get('ymin', '')),
+                                        float(row.get('xmax', '')),
+                                        float(row.get('ymax', '')),
+                                        iw,
+                                        ih,
+                                    )
+                                ]
+                            except (TypeError, ValueError):
+                                boxes = []
+                            boxes = [box for box in boxes if box]
+
+                        lbl = _canonical_detection_label(raw_label or _default_detection_label())
+                        for box in boxes:
+                            labeled_map.setdefault(img_name, []).append({
+                                'label': lbl,
+                                **box,
+                            })
+                            loaded_csv_boxes += 1
+                return loaded_csv_boxes
+
+            try:
+                for names_file in list(Path(extract_dir).rglob('classes.txt')) + list(Path(extract_dir).rglob('obj.names')):
+                    with open(names_file, 'r', encoding='utf-8') as nf:
+                        for line in nf:
+                            label_name = line.strip()
+                            if label_name:
+                                declared_class_names.add(_canonical_detection_label(label_name))
+            except Exception as e:
+                logger.warning("任务 %s 预扫描目标检测类别失败: %s", task_id, e)
+
             # 若上传了标注文件（可选），优先尝试解析 JSON(COCO) 或 CSV
             if task.label_file and Path(task.label_file.path).exists():
                 label_file_path = Path(task.label_file.path)
@@ -849,52 +1091,25 @@ def process_annotation_task(self, task_id):
                     if label_file_path.suffix.lower() == '.json':
                         with open(label_file_path, 'r', encoding='utf-8') as jf:
                             label_json = json.load(jf)
+                        if isinstance(label_json, dict):
+                            for shape in label_json.get('shapes', []) or []:
+                                if isinstance(shape, dict) and shape.get('label'):
+                                    declared_class_names.add(_canonical_detection_label(shape.get('label')))
                         if isinstance(label_json, dict) and 'images' in label_json and 'annotations' in label_json:
                             before_label_count = len(labeled_map)
                             _append_coco_annotations(label_json)
                             external_label_loaded = external_label_loaded or len(labeled_map) > before_label_count
                             logger.info("任务 %s 从上传标注 JSON %s 解析到 %s 张有标注图片", task_id, label_file_path.name, len(labeled_map))
                     elif label_file_path.suffix.lower() == '.csv':
-                        with open(label_file_path, 'r', encoding='utf-8', newline='') as cf:
-                            reader = csv.DictReader(cf)
-                            for row in reader:
-                                fname = (row.get('filename') or row.get('image') or row.get('image_name') or '').strip()
-                                if not fname:
-                                    continue
-                                img_name = Path(fname).name
-                                img_path = image_by_name.get(img_name)
-                                if not img_path:
-                                    continue
-                                try:
-                                    xmin = float(row.get('xmin', ''))
-                                    ymin = float(row.get('ymin', ''))
-                                    xmax = float(row.get('xmax', ''))
-                                    ymax = float(row.get('ymax', ''))
-                                except Exception:
-                                    continue
-                                if xmax <= xmin or ymax <= ymin:
-                                    continue
-
-                                # 使用图片实际尺寸做归一化，避免依赖 CSV 附加宽高字段
-                                with Image.open(img_path) as im:
-                                    iw, ih = im.size
-                                if iw <= 0 or ih <= 0:
-                                    continue
-                                x = (xmin + xmax) / 2.0 / iw
-                                y = (ymin + ymax) / 2.0 / ih
-                                w = (xmax - xmin) / iw
-                                h = (ymax - ymin) / ih
-                                lbl = _canonical_detection_label((row.get('class') or row.get('label') or 'obj').strip() or 'obj')
-
-                                labeled_map.setdefault(img_name, []).append({
-                                    'label': lbl,
-                                    'x': max(0.0, min(1.0, x)),
-                                    'y': max(0.0, min(1.0, y)),
-                                    'w': max(0.0, min(1.0, w)),
-                                    'h': max(0.0, min(1.0, h)),
-                                })
-                        external_label_loaded = True
-                        logger.info("任务 %s 从上传标注 CSV %s 解析到 %s 张有标注图片", task_id, label_file_path.name, len(labeled_map))
+                        loaded_csv_boxes = _append_csv_annotations(label_file_path)
+                        external_label_loaded = external_label_loaded or loaded_csv_boxes > 0
+                        logger.info("Loaded detection CSV labels for task %s from %s: %s images, %s boxes", task_id, label_file_path.name, len(labeled_map), loaded_csv_boxes)
+                    elif label_file_path.suffix.lower() in {'.txt', '.names'}:
+                        with open(label_file_path, 'r', encoding='utf-8') as lf:
+                            for line in lf:
+                                label_name = line.strip()
+                                if label_name:
+                                    declared_class_names.add(_canonical_detection_label(label_name))
                 except Exception as e:
                     logger.warning("任务 %s 解析上传标注文件失败: %s", task_id, e)
 
@@ -918,6 +1133,45 @@ def process_annotation_task(self, task_id):
                             break
                 except Exception as e:
                     logger.warning("任务 %s 解析 COCO 标注失败，将继续使用人工标注流程: %s", task_id, e)
+
+            if not external_label_loaded:
+                try:
+                    csv_candidates = sorted(Path(extract_dir).rglob('*.csv'))
+                    for csv_file in csv_candidates:
+                        loaded_csv_boxes = _append_csv_annotations(csv_file)
+                        external_label_loaded = external_label_loaded or loaded_csv_boxes > 0
+                        if loaded_csv_boxes > 0:
+                            logger.info(
+                                "任务 %s 从压缩包 CSV %s 解析到 %s 张有标注图片，%s 个框",
+                                task_id,
+                                csv_file.name,
+                                len(labeled_map),
+                                loaded_csv_boxes,
+                            )
+                            break
+                except Exception as e:
+                    logger.warning("任务 %s 解析压缩包 CSV 标注失败，将继续使用人工标注流程: %s", task_id, e)
+
+            try:
+                for names_file in list(Path(extract_dir).rglob('classes.txt')) + list(Path(extract_dir).rglob('obj.names')):
+                    with open(names_file, 'r', encoding='utf-8') as nf:
+                        for line in nf:
+                            label_name = line.strip()
+                            if label_name:
+                                declared_class_names.add(_canonical_detection_label(label_name))
+
+                for json_file in list(Path(extract_dir).rglob('instances*.json')) + list(Path(extract_dir).rglob('annotations*.json')):
+                    with open(json_file, 'r', encoding='utf-8') as jf:
+                        label_json = json.load(jf)
+                    if isinstance(label_json, dict):
+                        for category in label_json.get('categories', []) or []:
+                            if isinstance(category, dict) and category.get('name'):
+                                declared_class_names.add(_canonical_detection_label(category.get('name')))
+                        for shape in label_json.get('shapes', []) or []:
+                            if isinstance(shape, dict) and shape.get('label'):
+                                declared_class_names.add(_canonical_detection_label(shape.get('label')))
+            except Exception as e:
+                logger.warning("浠诲姟 %s 鎵弿鐩爣妫€娴嬪０鏄庣被鍒け璐? %s", task_id, e)
 
             db_manual_map = {}
             db_manual_confirmed_names = set()
@@ -1046,7 +1300,7 @@ def process_annotation_task(self, task_id):
                         class_names.add(box['label'])
                     usable_boxes.append(box)
                 if usable_boxes:
-                    usable_labeled_map[image_name] = usable_boxes
+                    usable_labeled_map[image_name] = _dedupe_detection_boxes(usable_boxes)
 
             manual_negative_names = db_manual_confirmed_names - set(usable_labeled_map.keys())
             labeled_map = usable_labeled_map
@@ -1057,6 +1311,60 @@ def process_annotation_task(self, task_id):
                     len(manual_negative_names),
                 )
 
+            image_sequence_by_name = {p.name: index for index, p in enumerate(image_files, start=1)}
+
+            def _accepted_manual_detection_annotations(boxes):
+                annotations = []
+                for box in boxes:
+                    annotations.append({
+                        'label': box.get('label') or '',
+                        'x': box.get('x'),
+                        'y': box.get('y'),
+                        'w': box.get('w'),
+                        'h': box.get('h'),
+                        'shape_type': 'rectangle',
+                        'source': 'manual',
+                        'decision': 'accepted',
+                        'sample_mode': 'uploaded_label',
+                    })
+                return annotations
+
+            def _sync_external_detection_labels():
+                ResultModel = apps.get_model('data_management', 'ImageResult')
+                synced_count = 0
+                for image_name, boxes in labeled_map.items():
+                    img_path = image_by_name.get(image_name)
+                    if not img_path or not boxes:
+                        continue
+                    labels = [box.get('label') for box in boxes if box.get('label')]
+                    primary_label = labels[0] if labels else ''
+                    annotations = _accepted_manual_detection_annotations(boxes)
+                    existing = ResultModel.objects.filter(task=task, image_name=image_name).order_by('-confidence', 'id').first()
+                    if existing and existing.confidence == -1:
+                        ResultModel.objects.filter(task=task, image_name=image_name).exclude(confidence=-1).delete()
+                        continue
+                    if existing:
+                        existing.label = primary_label
+                        existing.confidence = -1.0
+                        existing.annotations = annotations
+                        existing.status = 'verified'
+                        existing.save(update_fields=['label', 'confidence', 'annotations', 'status'])
+                    else:
+                        ResultModel.objects.create(
+                            task=task,
+                            sequence_number=image_sequence_by_name.get(image_name, 1),
+                            image_name=image_name,
+                            image_path=str(img_path.resolve()),
+                            label=primary_label,
+                            confidence=-1.0,
+                            annotations=annotations,
+                            status='verified',
+                        )
+                    ResultModel.objects.filter(task=task, image_name=image_name).exclude(confidence=-1).delete()
+                    synced_count += 1
+                if synced_count:
+                    logger.info("任务 %s 已将 %s 张外部检测标注同步为人工已确认样本", task_id, synced_count)
+
             # 如果 Task 中预设了 label_list，优先使用
             if task.label_list:
                 class_list = []
@@ -1064,13 +1372,44 @@ def process_annotation_task(self, task_id):
                     canonical_label = _canonical_detection_label(label_name)
                     if canonical_label not in class_list:
                         class_list.append(canonical_label)
+                for label_name in sorted(declared_class_names | class_names):
+                    canonical_label = _canonical_detection_label(label_name)
+                    if canonical_label not in class_list:
+                        class_list.append(canonical_label)
             else:
-                class_list = sorted(list(class_names))
+                class_list = sorted(list(declared_class_names | class_names))
 
+            class_list = _remove_detection_placeholder_label(class_list)
             if not class_list:
-                class_list = ['obj']
+                class_list = [DETECTION_PLACEHOLDER_LABEL]
+
+            if list(task.label_list or []) != class_list:
+                task.label_list = class_list
+                task.save(update_fields=['label_list'])
 
             class2id = {n: i for i, n in enumerate(class_list)}
+            _sync_external_detection_labels()
+            detection_review_context = build_detection_review_context(
+                image_by_name,
+                labeled_map,
+                class_list,
+            )
+            detection_review_context = merge_positive_index_context(task, detection_review_context)
+            review_queue_version = get_next_queue_version(task)
+            total_images = max(len(image_files), 1)
+
+            def _update_detection_stage_progress(current, total, start, end):
+                if total <= 0:
+                    _update_task_progress(task, end, self)
+                    return
+                progress = start + round((current / total) * (end - start))
+                _update_task_progress(task, progress, self)
+
+            def _should_update_detection_progress(index, total):
+                if total <= 0:
+                    return False
+                batch_size = max(1, math.ceil(total / 40))
+                return index == total or index % batch_size == 0
 
             def _label_path_for_image(img_path):
                 parts = list(img_path.parts)
@@ -1081,7 +1420,7 @@ def process_annotation_task(self, task_id):
                 return img_path.parent / 'labels' / f"{img_path.stem}.txt"
 
             # 为每张图片生成 YOLO 格式的 label 文件（放在解压目录旁，跟图片同目录）
-            for img_path in image_files:
+            for index, img_path in enumerate(image_files, start=1):
                 stem = img_path.stem
                 anns = labeled_map.get(img_path.name) or []
                 label_lines = []
@@ -1094,7 +1433,9 @@ def process_annotation_task(self, task_id):
                         if w <= 0 or h <= 0:
                             continue
                         lbl = a.get('label') or class_list[0]
-                        cid = class2id.get(lbl, 0)
+                        cid = class2id.get(lbl)
+                        if cid is None:
+                            continue
                         label_lines.append(f"{cid} {x:.6f} {y:.6f} {w:.6f} {h:.6f}")
                     except Exception:
                         continue
@@ -1107,6 +1448,8 @@ def process_annotation_task(self, task_id):
                             lf.write(ln + '\n')
                 except Exception as e:
                     logger.warning(f"无法写入标签文件 {label_file}: {e}")
+                if _should_update_detection_progress(index, total_images):
+                    _update_detection_stage_progress(index, total_images, 10, 20)
 
             _update_task_progress(task, 20, self)
 
@@ -1126,38 +1469,42 @@ def process_annotation_task(self, task_id):
             detect_py = Path(settings.BASE_DIR) / 'smartlabel' / 'apps' / 'algorithm' / 'efficientteacher-main' / 'detect.py'
             detect_source = extract_dir / 'images' if (extract_dir / 'images').exists() else extract_dir
 
-            def _detection_empty_uncertainty(image_path):
-                try:
-                    with Image.open(image_path) as img:
-                        gray = img.convert('L').resize((64, 64))
-                        histogram = gray.histogram()
-                        total = float(sum(histogram)) or 1.0
-                        entropy = -sum(
-                            (count / total) * math.log2(count / total)
-                            for count in histogram
-                            if count
-                        )
-                        return round(max(0.0, min(1.0, entropy / 8.0)), 6)
-                except Exception:
-                    try:
-                        return round(max(0.0, min(1.0, image_path.stat().st_size / (1024 * 1024))), 6)
-                    except Exception:
-                        return 0.0
+            def _detection_review_result(annotations, image_path, pre_filter_count=0, post_filter_count=0):
+                return detection_review_value_detail(
+                    annotations,
+                    image_path,
+                    review_context=detection_review_context,
+                    pre_filter_count=pre_filter_count,
+                    post_filter_count=post_filter_count,
+                )
 
-            def _build_empty_detection_rows():
+            def _detection_review_value(annotations, image_path, pre_filter_count=0, post_filter_count=0):
+                score, low_confidence_count, _detail = _detection_review_result(
+                    annotations,
+                    image_path,
+                    pre_filter_count=pre_filter_count,
+                    post_filter_count=post_filter_count,
+                )
+                return score, low_confidence_count
+
+            def _build_empty_detection_rows(progress_start=80, progress_end=88):
                 rows = []
                 for seq, img_path in enumerate(image_files, start=1):
+                    review_score, low_confidence_count, review_detail = _detection_review_result([], img_path)
                     rows.append({
                         'sequence_number': seq,
                         'image_name': img_path.name,
                         'image_path': str(img_path.resolve()),
                         'annotations': [],
                         'confidence': 0.0,
-                        'uncertainty_score': _detection_empty_uncertainty(img_path),
-                        'low_confidence_count': 0,
+                        'uncertainty_score': review_score,
+                        'low_confidence_count': low_confidence_count,
                         'detection_count': 0,
                         'status': 'unverified',
+                        'review_detail': review_detail,
                     })
+                    if _should_update_detection_progress(seq, total_images):
+                        _update_detection_stage_progress(seq, total_images, progress_start, progress_end)
                 return rows
 
             def _coco_id_to_label_map():
@@ -1169,7 +1516,7 @@ def process_annotation_task(self, task_id):
                         coco_id_to_label[coco_id] = normalized_label
                 return coco_id_to_label
 
-            def _collect_detection_rows_from_labels(pred_labels_dir, id_to_label, sample_mode):
+            def _collect_detection_rows_from_labels(pred_labels_dir, id_to_label, sample_mode, progress_start=80, progress_end=88):
                 rows = []
                 raw_count = 0
                 filtered_count = 0
@@ -1177,6 +1524,7 @@ def process_annotation_task(self, task_id):
                     label_file = pred_labels_dir / (img_path.stem + '.txt')
                     annotations = []
                     max_conf = 0.0
+                    image_raw_count = 0
                     if label_file.exists():
                         with open(label_file, 'r', encoding='utf-8') as lf:
                             for line in lf:
@@ -1193,6 +1541,7 @@ def process_annotation_task(self, task_id):
                                 h = float(parts[4])
                                 conf = float(parts[5]) if len(parts) >= 6 else 0.0
                                 raw_count += 1
+                                image_raw_count += 1
                                 if conf < DETECTION_STORE_CONF_THRES:
                                     filtered_count += 1
                                     continue
@@ -1209,12 +1558,16 @@ def process_annotation_task(self, task_id):
                                     'sample_mode': sample_mode,
                                 })
                         annotations.sort(key=lambda item: float(item.get('confidence') or 0.0), reverse=True)
+                        annotations = _dedupe_detection_boxes(annotations)
                         annotations = annotations[:DETECTION_MAX_BOXES_PER_IMAGE]
                         max_conf = max((float(item.get('confidence') or 0.0) for item in annotations), default=0.0)
 
-                    uncertainty_score, low_confidence_count = detection_uncertainty(annotations)
-                    if not annotations:
-                        uncertainty_score = max(uncertainty_score, _detection_empty_uncertainty(img_path))
+                    uncertainty_score, low_confidence_count, review_detail = _detection_review_result(
+                        annotations,
+                        img_path,
+                        pre_filter_count=image_raw_count,
+                        post_filter_count=len(annotations),
+                    )
                     rows.append({
                         'sequence_number': seq,
                         'image_name': img_path.name,
@@ -1225,17 +1578,20 @@ def process_annotation_task(self, task_id):
                         'low_confidence_count': low_confidence_count,
                         'detection_count': len(annotations),
                         'status': 'unverified',
+                        'review_detail': review_detail,
                     })
+                    if _should_update_detection_progress(seq, total_images):
+                        _update_detection_stage_progress(seq, total_images, progress_start, progress_end)
                 return rows, raw_count, filtered_count
 
-            def _run_pretrained_detection_rows(reason):
+            def _run_pretrained_detection_rows(reason, subprocess_start=20, subprocess_end=80, collect_start=80, collect_end=88):
                 if not DETECTION_PRETRAINED_WEIGHT.exists():
                     logger.warning("目标检测基础预训练权重不存在，无法执行 %s: %s", reason, DETECTION_PRETRAINED_WEIGHT)
-                    return _build_empty_detection_rows(), 0, 0
+                    return _build_empty_detection_rows(collect_start, collect_end), 0, 0
                 coco_id_to_label = _coco_id_to_label_map()
                 if not coco_id_to_label:
                     logger.info("当前目标检测标签不在 COCO 基础类别中，跳过基础模型冷启动推理: labels=%s", class_list)
-                    return _build_empty_detection_rows(), 0, 0
+                    return _build_empty_detection_rows(collect_start, collect_end), 0, 0
 
                 pred_dir = Path(result_dir) / 'pred'
                 if pred_dir.exists():
@@ -1263,14 +1619,22 @@ def process_annotation_task(self, task_id):
                     DETECTION_PRETRAINED_WEIGHT,
                     coco_id_to_label,
                 )
-                run_subprocess_with_progress(cmd, task_id)
+                run_subprocess_with_progress(
+                    cmd,
+                    task_id,
+                    total_files=total_images,
+                    progress_start=subprocess_start,
+                    progress_end=subprocess_end,
+                )
                 pred_labels_dir = pred_dir / 'labels'
                 if not pred_labels_dir.exists():
-                    return _build_empty_detection_rows(), 0, 0
+                    return _build_empty_detection_rows(collect_start, collect_end), 0, 0
                 return _collect_detection_rows_from_labels(
                     pred_labels_dir,
                     coco_id_to_label,
                     'base_pretrained_prediction',
+                    collect_start,
+                    collect_end,
                 )
 
             def _persist_detection_rows(rows, mode):
@@ -1291,10 +1655,13 @@ def process_annotation_task(self, task_id):
                         ],
                     )
                     writer.writeheader()
-                    for row in rows:
+                    for index, row in enumerate(rows, start=1):
                         csv_row = row.copy()
+                        csv_row.pop('review_detail', None)
                         csv_row['annotations'] = json.dumps(csv_row['annotations'], ensure_ascii=False)
                         writer.writerow(csv_row)
+                        if _should_update_detection_progress(index, len(rows)):
+                            _update_detection_stage_progress(index, len(rows), 88, 91)
 
                 ResultModel = apps.get_model('data_management', 'ImageResult')
                 manual_image_names = set(
@@ -1305,7 +1672,7 @@ def process_annotation_task(self, task_id):
                 with transaction.atomic():
                     ResultModel.objects.filter(task=task).exclude(confidence=-1).delete()
                     instances = []
-                    for row in rows:
+                    for index, row in enumerate(rows, start=1):
                         if row['image_name'] in manual_image_names:
                             continue
                         instances.append(ResultModel(
@@ -1318,8 +1685,18 @@ def process_annotation_task(self, task_id):
                             annotations=row['annotations'],
                             status=row['status'],
                         ))
+                        if _should_update_detection_progress(index, len(rows)):
+                            _update_detection_stage_progress(index, len(rows), 91, 94)
                     if instances:
                         ResultModel.objects.bulk_create(instances)
+                    if manual_image_names:
+                        ResultModel.objects.filter(task=task, image_name__in=manual_image_names).exclude(confidence=-1).delete()
+                persist_review_queue_items(
+                    task,
+                    rows,
+                    review_queue_version,
+                    progress_callback=lambda current, total: _update_detection_stage_progress(current, total, 94, 95),
+                )
 
                 _update_task_progress(task, 95, self)
                 task.progress = 100
@@ -1354,36 +1731,20 @@ def process_annotation_task(self, task_id):
                 }
 
             if not labeled_images:
-                def _cold_start_detection_uncertainty(image_path):
-                    try:
-                        with Image.open(image_path) as img:
-                            gray = img.convert('L').resize((64, 64))
-                            histogram = gray.histogram()
-                            total = float(sum(histogram)) or 1.0
-                            entropy = -sum(
-                                (count / total) * math.log2(count / total)
-                                for count in histogram
-                                if count
-                            )
-                            return round(max(0.0, min(1.0, entropy / 8.0)), 6)
-                    except Exception:
-                        try:
-                            return round(max(0.0, min(1.0, image_path.stat().st_size / (1024 * 1024))), 6)
-                        except Exception:
-                            return 0.0
-
                 result_rows = []
                 for seq, img_path in enumerate(image_files, start=1):
+                    review_score, low_confidence_count, review_detail = _detection_review_result([], img_path)
                     result_rows.append({
                         'sequence_number': seq,
                         'image_name': img_path.name,
                         'image_path': str(img_path.resolve()),
                         'annotations': [],
                         'confidence': 0.0,
-                        'uncertainty_score': _cold_start_detection_uncertainty(img_path),
-                        'low_confidence_count': 0,
+                        'uncertainty_score': review_score,
+                        'low_confidence_count': low_confidence_count,
                         'detection_count': 0,
                         'status': 'unverified',
+                        'review_detail': review_detail,
                     })
 
                 result_dir.mkdir(parents=True, exist_ok=True)
@@ -1405,6 +1766,7 @@ def process_annotation_task(self, task_id):
                     writer.writeheader()
                     for row in result_rows:
                         csv_row = row.copy()
+                        csv_row.pop('review_detail', None)
                         csv_row['annotations'] = json.dumps(csv_row['annotations'], ensure_ascii=False)
                         writer.writerow(csv_row)
 
@@ -1424,6 +1786,12 @@ def process_annotation_task(self, task_id):
                         )
                         for row in result_rows
                     ])
+                persist_review_queue_items(
+                    task,
+                    result_rows,
+                    review_queue_version,
+                    progress_callback=lambda current, total: _update_detection_stage_progress(current, total, 94, 95),
+                )
 
                 _update_task_progress(task, 95, self)
                 task.progress = 100
@@ -1560,7 +1928,12 @@ def process_annotation_task(self, task_id):
 
             logger.info(f"执行目标检测训练命令: {' '.join(shlex.quote(s) for s in cmd)}")
             _update_task_progress(task, 40, self)
-            run_subprocess_with_progress(cmd, task_id)
+            run_subprocess_with_progress(
+                cmd,
+                task_id,
+                progress_start=40,
+                progress_end=75,
+            )
 
             _update_task_progress(task, 75, self)
 
@@ -1609,7 +1982,13 @@ def process_annotation_task(self, task_id):
             pred_dir = Path(result_dir) / 'pred'
             if pred_dir.exists():
                 shutil.rmtree(pred_dir)
-            run_subprocess_with_progress(detect_cmd, task_id)
+            run_subprocess_with_progress(
+                detect_cmd,
+                task_id,
+                total_files=total_images,
+                progress_start=75,
+                progress_end=82,
+            )
 
             # 解析 detect 输出 labels，生成 result.csv 并落库
             pred_labels_dir = pred_dir / 'labels'
@@ -1628,6 +2007,7 @@ def process_annotation_task(self, task_id):
                 label_file = pred_labels_dir / (img_path.stem + '.txt')
                 annotations = []
                 max_conf = 0.0
+                image_raw_count = 0
                 if label_file.exists():
                     with open(label_file, 'r', encoding='utf-8') as lf:
                         for line in lf:
@@ -1651,6 +2031,7 @@ def process_annotation_task(self, task_id):
                                 h = float(parts[4])
                                 conf = float(parts[5]) if len(parts) >= 6 else 0.0
                                 raw_predicted_box_count += 1
+                                image_raw_count += 1
                                 if conf < DETECTION_STORE_CONF_THRES:
                                     filtered_low_confidence_count += 1
                                     continue
@@ -1667,10 +2048,16 @@ def process_annotation_task(self, task_id):
                                     'sample_mode': 'model_prediction',
                                 })
                     annotations.sort(key=lambda item: float(item.get('confidence') or 0.0), reverse=True)
+                    annotations = _dedupe_detection_boxes(annotations)
                     annotations = annotations[:DETECTION_MAX_BOXES_PER_IMAGE]
                     max_conf = max((float(item.get('confidence') or 0.0) for item in annotations), default=0.0)
 
-                uncertainty_score, low_confidence_count = detection_uncertainty(annotations)
+                uncertainty_score, low_confidence_count, review_detail = _detection_review_result(
+                    annotations,
+                    img_path,
+                    pre_filter_count=image_raw_count,
+                    post_filter_count=len(annotations),
+                )
                 results_rows.append({
                     'sequence_number': seq,
                     'image_name': img_name,
@@ -1680,8 +2067,11 @@ def process_annotation_task(self, task_id):
                     'uncertainty_score': uncertainty_score,
                     'low_confidence_count': low_confidence_count,
                     'detection_count': len(annotations),
-                    'status': 'unverified'
+                    'status': 'unverified',
+                    'review_detail': review_detail,
                 })
+                if _should_update_detection_progress(seq, total_images):
+                    _update_detection_stage_progress(seq, total_images, 82, 88)
 
             # 将结果写入数据库（ImageResult）
             predicted_image_count = sum(1 for row in results_rows if row['annotations'])
@@ -1739,7 +2129,13 @@ def process_annotation_task(self, task_id):
                         '--classes',
                         *[str(i) for i in sorted(coco_id_to_label.keys())],
                     ]
-                    run_subprocess_with_progress(fallback_cmd, task_id)
+                    run_subprocess_with_progress(
+                        fallback_cmd,
+                        task_id,
+                        total_files=total_images,
+                        progress_start=88,
+                        progress_end=92,
+                    )
                     pred_labels_dir = pred_dir / 'labels'
                     if not pred_labels_dir.exists():
                         raise FileNotFoundError(f"目标检测基础预训练兜底推理未生成标签目录: {pred_labels_dir}")
@@ -1753,6 +2149,7 @@ def process_annotation_task(self, task_id):
                         label_file = pred_labels_dir / (img_path.stem + '.txt')
                         annotations = []
                         max_conf = 0.0
+                        image_raw_count = 0
                         if label_file.exists():
                             with open(label_file, 'r', encoding='utf-8') as lf:
                                 for line in lf:
@@ -1769,6 +2166,7 @@ def process_annotation_task(self, task_id):
                                     h = float(parts[4])
                                     conf = float(parts[5]) if len(parts) >= 6 else 0.0
                                     raw_predicted_box_count += 1
+                                    image_raw_count += 1
                                     if conf < DETECTION_STORE_CONF_THRES:
                                         filtered_low_confidence_count += 1
                                         continue
@@ -1785,10 +2183,16 @@ def process_annotation_task(self, task_id):
                                         'sample_mode': 'base_pretrained_prediction',
                                     })
                             annotations.sort(key=lambda item: float(item.get('confidence') or 0.0), reverse=True)
+                            annotations = _dedupe_detection_boxes(annotations)
                             annotations = annotations[:DETECTION_MAX_BOXES_PER_IMAGE]
                             max_conf = max((float(item.get('confidence') or 0.0) for item in annotations), default=0.0)
 
-                        uncertainty_score, low_confidence_count = detection_uncertainty(annotations)
+                        uncertainty_score, low_confidence_count, review_detail = _detection_review_result(
+                            annotations,
+                            img_path,
+                            pre_filter_count=image_raw_count,
+                            post_filter_count=len(annotations),
+                        )
                         results_rows.append({
                             'sequence_number': seq,
                             'image_name': img_name,
@@ -1798,8 +2202,11 @@ def process_annotation_task(self, task_id):
                             'uncertainty_score': uncertainty_score,
                             'low_confidence_count': low_confidence_count,
                             'detection_count': len(annotations),
-                            'status': 'unverified'
+                            'status': 'unverified',
+                            'review_detail': review_detail,
                         })
+                        if _should_update_detection_progress(seq, total_images):
+                            _update_detection_stage_progress(seq, total_images, 92, 94)
                     predicted_image_count = sum(1 for row in results_rows if row['annotations'])
                     predicted_box_count = sum(len(row['annotations']) for row in results_rows)
                     logger.info(
@@ -1831,10 +2238,13 @@ def process_annotation_task(self, task_id):
                     ],
                 )
                 writer.writeheader()
-                for row in results_rows:
+                for index, row in enumerate(results_rows, start=1):
                     csv_row = row.copy()
+                    csv_row.pop('review_detail', None)
                     csv_row['annotations'] = json.dumps(csv_row['annotations'], ensure_ascii=False)
                     writer.writerow(csv_row)
+                    if _should_update_detection_progress(index, len(results_rows)):
+                        _update_detection_stage_progress(index, len(results_rows), 88, 91)
 
             ResultModel = apps.get_model('data_management', 'ImageResult')
 
@@ -1848,7 +2258,7 @@ def process_annotation_task(self, task_id):
                 # 只清理模型预测结果，保留人工标注 ground truth。
                 ResultModel.objects.filter(task=task).exclude(confidence=-1).delete()
                 instances = []
-                for r in results_rows:
+                for index, r in enumerate(results_rows, start=1):
                     if r['image_name'] in manual_image_names:
                         continue
                     instances.append(ResultModel(
@@ -1861,8 +2271,18 @@ def process_annotation_task(self, task_id):
                         annotations=r['annotations'],
                         status='unverified'
                     ))
+                    if _should_update_detection_progress(index, len(results_rows)):
+                        _update_detection_stage_progress(index, len(results_rows), 91, 94)
                 if instances:
                     ResultModel.objects.bulk_create(instances)
+                if manual_image_names:
+                    ResultModel.objects.filter(task=task, image_name__in=manual_image_names).exclude(confidence=-1).delete()
+            persist_review_queue_items(
+                task,
+                results_rows,
+                review_queue_version,
+                progress_callback=lambda current, total: _update_detection_stage_progress(current, total, 94, 95),
+            )
 
             _update_task_progress(task, 90, self)
             # 最终推进到完成状态由外层逻辑处理

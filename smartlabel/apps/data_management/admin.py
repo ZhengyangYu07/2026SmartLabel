@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Task, ImageResult, TextResult
+from .models import MissFixTable, PositiveIndex, ReviewQueueCache, Task, ImageResult, TextResult
 
 
 @admin.register(Task)
@@ -56,3 +56,24 @@ class TextResultAdmin(admin.ModelAdmin):
     list_display = ('label', 'confidence', 'status', 'content')
     list_filter = ('label', 'status')  # 指定可以过滤的字段
     search_fields = ('content', 'label')  # 指定可以搜索的字段
+
+
+@admin.register(PositiveIndex)
+class PositiveIndexAdmin(admin.ModelAdmin):
+    list_display = ('task', 'image_name', 'class_label', 'source_type', 'index_version', 'is_active', 'created_at')
+    list_filter = ('source_type', 'is_active')
+    search_fields = ('image_name', 'class_label', 'sample_id')
+
+
+@admin.register(MissFixTable)
+class MissFixTableAdmin(admin.ModelAdmin):
+    list_display = ('task', 'sample_id', 'manual_class', 'index_write_status', 'positive_index_version', 'fixed_at')
+    list_filter = ('index_write_status',)
+    search_fields = ('sample_id', 'manual_class')
+
+
+@admin.register(ReviewQueueCache)
+class ReviewQueueCacheAdmin(admin.ModelAdmin):
+    list_display = ('task', 'sample_id', 'branch_type', 'review_score', 'cache_status', 'queue_version', 'index_version_snapshot')
+    list_filter = ('branch_type', 'cache_status')
+    search_fields = ('sample_id', 'trigger_reason')

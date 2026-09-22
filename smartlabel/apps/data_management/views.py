@@ -1,6 +1,7 @@
 import codecs
 import csv
 import hashlib
+import json
 import logging
 import os
 import shutil
@@ -23,7 +24,6 @@ from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods, require_POST
 from io import StringIO
-from kombu.utils import json
 from PIL import Image
 from django.db.models.functions import Lower
 from functools import reduce
@@ -36,9 +36,80 @@ from celery import current_app as celery_app
 from celery.exceptions import OperationalError
 
 from .models import Task, ImageResult, TextResult, FavoriteTask
-from .utils.config import TASK_CONFIG, TaskService
+from .services.detection_loop import apply_detection_loop_update
+from .utils.config import TASK_CONFIG, TaskService, display_task_progress
 
 logger = logging.getLogger(__name__)
+DETECTION_PLACEHOLDER_LABEL = 'obj'
+
+
+def _remove_detection_placeholder_label(labels):
+    label_list = [str(label or '').strip() for label in labels if str(label or '').strip()]
+    has_real_label = any(label != DETECTION_PLACEHOLDER_LABEL for label in label_list)
+    if not has_real_label:
+        return label_list
+    return [label for label in label_list if label != DETECTION_PLACEHOLDER_LABEL]
+
+
+def _sync_detection_task_labels(task, labels):
+    if task.task_type != 'object-detection':
+        return
+
+    merged_labels = []
+    for label in list(task.label_list or []) + list(labels or []):
+        value = str(label or '').strip()
+        if value and value not in merged_labels:
+            merged_labels.append(value)
+
+    merged_labels = _remove_detection_placeholder_label(merged_labels)
+    if merged_labels and list(task.label_list or []) != merged_labels:
+        task.label_list = merged_labels
+        task.save(update_fields=['label_list'])
+
+
+def _filter_detection_annotations_for_display(item, annotations):
+    if not isinstance(annotations, list):
+        return []
+
+    try:
+        is_manual_item = float(item.confidence) == -1.0
+    except (TypeError, ValueError):
+        is_manual_item = False
+
+    if not is_manual_item:
+        return annotations
+
+    has_confirmed_annotation = any(
+        isinstance(annotation, dict)
+        and (
+            annotation.get('source') == 'manual'
+            or annotation.get('decision') in ('accepted', 'manual', 'modified')
+            or annotation.get('annotation_status') in ('accepted', 'manual', 'modified')
+        )
+        for annotation in annotations
+    )
+    if not has_confirmed_annotation:
+        return annotations
+
+    normalized_annotations = []
+    for annotation in annotations:
+        if not isinstance(annotation, dict):
+            continue
+        decision = annotation.get('decision') or annotation.get('annotation_status') or 'pending'
+        if annotation.get('source') == 'model' and decision in ('pending', 'rejected'):
+            continue
+        normalized = dict(annotation)
+        if item.status == 'verified' and decision != 'rejected':
+            normalized['source'] = 'manual'
+            normalized['decision'] = 'accepted'
+        normalized_annotations.append(normalized)
+    return normalized_annotations
+
+
+def _stable_task_total_count(task, fallback_count):
+    if task.task_type == 'object-detection' and getattr(task, 'uploaded_total', 0):
+        return task.uploaded_total
+    return fallback_count
 
 
 def _get_task_runners():
@@ -90,7 +161,44 @@ def _remove_task_message_from_broker(celery_task_id):
         except Exception as e:
             logger.warning("清理队列 %s 中的任务消息失败: %s", queue_name, e)
 
+    try:
+        unacked_messages = redis_client.hgetall('unacked')
+        for delivery_tag, message in unacked_messages.items():
+            payload = message.decode('utf-8', errors='ignore')
+            if celery_task_id in payload:
+                removed_count += redis_client.hdel('unacked', delivery_tag)
+                redis_client.zrem('unacked_index', delivery_tag)
+    except Exception as e:
+        logger.warning("清理 Redis unacked 中的任务消息失败: %s", e)
+
     return removed_count
+
+
+def _safe_remove_file(path, label):
+    if not path:
+        return False
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+            logger.info("已删除%s: %s", label, path)
+            return True
+    except Exception as e:
+        logger.warning("删除%s失败 %s: %s", label, path, e)
+    return False
+
+
+def _safe_remove_dir(path, label):
+    try:
+        if path and path.exists():
+            shutil.rmtree(path, ignore_errors=True)
+            if path.exists():
+                logger.warning("%s目录仍存在，可能被运行中的进程占用: %s", label, path)
+                return False
+            logger.info("已删除%s目录: %s", label, path)
+            return True
+    except Exception as e:
+        logger.warning("删除%s目录失败 %s: %s", label, path, e)
+    return False
 
 # 图片分类允许的扩展名
 ALLOWED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp']
@@ -117,26 +225,152 @@ def _get_label_verification_stats(task, result_model, relation_field):
     task_queryset = result_model.objects.filter(**{relation_field: task})
     manual_queryset = task_queryset.filter(confidence=-1)
 
-    verified_count = task_queryset.filter(status='verified').count()
-    total_count = task_queryset.count()
+    if task.task_type == 'object-detection':
+        total_count = _stable_task_total_count(task, task_queryset.count())
+        verified_count = task_queryset.filter(status='verified').values('image_name').distinct().count()
+        manual_annotated_count = manual_queryset.values('image_name').distinct().count()
+        unverified_count = max(total_count - verified_count, 0)
+        verification_progress = round((verified_count / total_count) * 100, 1) if total_count > 0 else 0
+
+        return {
+            'manual_annotated_count': manual_annotated_count,
+            'total_labeled_count': manual_annotated_count,
+            'verified_count': verified_count,
+            'unverified_count': unverified_count,
+            'unlabeled_count': unverified_count,
+            'total_count': total_count,
+            'total_verifiable_count': total_count,
+            'verification_progress': verification_progress,
+        }
+
+    total_count = _stable_task_total_count(task, task_queryset.count())
     manual_annotated_count = manual_queryset.count()
-    
-    # 未校验 = confidence=-1 的数据数量 - 已校验
-    unverified_count = manual_annotated_count - verified_count
+
+    verified_count = manual_queryset.filter(status='verified').count()
+    unverified_count = manual_queryset.filter(status='unverified').count()
+    unlabeled_count = task_queryset.exclude(confidence=-1).filter(status='unverified').count()
+    total_verifiable_count = manual_annotated_count
 
     verification_progress = 0
-    if total_count > 0:
-        verification_progress = round((verified_count / total_count) * 100, 1)
+    if total_verifiable_count > 0:
+        verification_progress = round((verified_count / total_verifiable_count) * 100, 1)
 
     return {
         'manual_annotated_count': manual_annotated_count,
         'total_labeled_count': manual_annotated_count,
         'verified_count': verified_count,
         'unverified_count': unverified_count,
+        'unlabeled_count': unlabeled_count,
         'total_count': total_count,
-        'total_verifiable_count': total_count,
+        'total_verifiable_count': total_verifiable_count,
         'verification_progress': verification_progress,
     }
+
+
+def _add_detection_label(label_set, label):
+    value = str(label or '').strip()
+    if value:
+        label_set.add(value)
+
+
+def _collect_detection_labels_from_json(label_set, json_data):
+    if not isinstance(json_data, dict):
+        return
+    for category in json_data.get('categories', []) or []:
+        if isinstance(category, dict):
+            _add_detection_label(label_set, category.get('name'))
+    for shape in json_data.get('shapes', []) or []:
+        if isinstance(shape, dict):
+            _add_detection_label(label_set, shape.get('label'))
+
+
+def _collect_detection_labels_from_file(label_set, label_path):
+    suffix = label_path.suffix.lower()
+    if suffix == '.json':
+        with open(label_path, 'r', encoding='utf-8') as f:
+            _collect_detection_labels_from_json(label_set, json.load(f))
+    elif suffix == '.csv':
+        with open(label_path, 'r', encoding='utf-8', newline='') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                for key in ('class', 'label', 'name', 'category'):
+                    value = row.get(key)
+                    if value:
+                        _add_detection_label(label_set, value)
+                        break
+    elif suffix in {'.txt', '.names'}:
+        with open(label_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                _add_detection_label(label_set, line)
+
+
+def _get_detection_label_options(task, result_model=None, relation_field='task'):
+    """Return all labels available to the detection editor, not only labels predicted on the current image."""
+    label_set = set()
+    for lbl in task.label_list or []:
+        _add_detection_label(label_set, lbl)
+
+    try:
+        label_file_path = Path(task.label_file.path) if task.label_file else None
+        if label_file_path and label_file_path.exists():
+            suffix = label_file_path.suffix.lower()
+            if suffix == '.json':
+                with open(label_file_path, 'r', encoding='utf-8') as f:
+                    label_data = json.load(f)
+                for category in label_data.get('categories', []) if isinstance(label_data, dict) else []:
+                    name = category.get('name')
+                    if isinstance(name, str) and name.strip():
+                        label_set.add(name.strip())
+                for shape in label_data.get('shapes', []) if isinstance(label_data, dict) else []:
+                    name = shape.get('label')
+                    if isinstance(name, str) and name.strip():
+                        label_set.add(name.strip())
+            elif suffix == '.csv':
+                with open(label_file_path, 'r', encoding='utf-8', newline='') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        for key in ('class', 'label', 'name', 'category'):
+                            name = row.get(key)
+                            if isinstance(name, str) and name.strip():
+                                label_set.add(name.strip())
+                                break
+            elif suffix in {'.txt', '.names'}:
+                with open(label_file_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        name = line.strip()
+                        if name:
+                            label_set.add(name)
+    except Exception as e:
+        logger.warning("读取目标检测任务 %s 的标签文件类别失败: %s", task.id, e)
+
+    try:
+        extracted_dir = Path(task.extracted_dir) if task.extracted_dir else None
+        if extracted_dir and extracted_dir.exists():
+            for names_file in list(extracted_dir.rglob('classes.txt')) + list(extracted_dir.rglob('obj.names')):
+                _collect_detection_labels_from_file(label_set, names_file)
+
+            for json_file in list(extracted_dir.rglob('instances*.json')) + list(extracted_dir.rglob('annotations*.json')):
+                _collect_detection_labels_from_file(label_set, json_file)
+
+            for labelme_file in extracted_dir.rglob('*.json'):
+                if labelme_file.name.startswith(('instances', 'annotations')):
+                    continue
+                _collect_detection_labels_from_file(label_set, labelme_file)
+    except Exception as e:
+        logger.warning("璇诲彇鐩爣妫€娴嬩换鍔?%s 鐨勮В鍘嬬洰褰曠被鍒け璐? %s", task.id, e)
+
+    if result_model is None:
+        result_model = TASK_CONFIG['object-detection']['result_model']
+
+    detection_items = result_model.objects.filter(**{relation_field: task}).only('annotations', 'label')
+    for det_item in detection_items:
+        _add_detection_label(label_set, det_item.label)
+        for ann in (det_item.annotations or []):
+            if not isinstance(ann, dict):
+                continue
+            _add_detection_label(label_set, ann.get('label'))
+
+    return sorted(_remove_detection_placeholder_label(label_set))
 
 
 def _check_compressed_file_contents(file_list, task_type):
@@ -185,7 +419,7 @@ def _check_compressed_file_contents(file_list, task_type):
         
         return {'status': 'success', 'message': '数据文件内容符合文本分类任务要求。'}
     elif task_type == 'object-detection':
-        # 支持多种标注格式：COCO (instances.json), VOC (annotations/*.xml), YOLO (labels/*.txt + classes.txt), CSV（image,xmin,ymin,xmax,ymax,class）
+        # 支持多种标注格式：COCO (instances.json), VOC (annotations/*.xml), YOLO (labels/*.txt + classes.txt), CSV（image,xmin,ymin,xmax,ymax,class 或 image,bounds）
         lowered = [f.lower() for f in actual_files]
 
         # COCO: instances*.json 或 annotations/*.json
@@ -212,7 +446,7 @@ def _check_compressed_file_contents(file_list, task_type):
 
         if has_csv:
             # 简单判断 CSV 是否可能为标注清单（不做深入解析）
-            return {'status': 'success', 'message': '检测到 CSV 标注清单，数据可能符合目标检测要求。'}
+            return {'status': 'success', 'message': '检测到 CSV 标注清单，支持 xyxy 列或 bounds 列，数据可能符合目标检测要求。'}
 
         return {'status': 'error', 'message': '目标检测任务未检测到支持的标注格式 (COCO/VOC/YOLO/CSV)。请检查压缩包是否包含 images/ 目录与相应标注文件。'}
 
@@ -620,22 +854,7 @@ def get_task_meta_data(request, task_id):
         # 获取所有唯一的标签
         # 目标检测标签可能存放在 annotations[].label 中；图像/文本分类仍沿用 label 字段。
         if task.task_type == 'object-detection':
-            label_set = set()
-            if task.label_list:
-                for lbl in task.label_list:
-                    if isinstance(lbl, str) and lbl.strip():
-                        label_set.add(lbl.strip())
-
-            detection_items = result_model.objects.filter(**{relation_field: task}).only('annotations', 'label')
-            for det_item in detection_items:
-                if det_item.label and str(det_item.label).strip():
-                    label_set.add(str(det_item.label).strip())
-                for ann in (det_item.annotations or []):
-                    lbl = (ann or {}).get('label')
-                    if isinstance(lbl, str) and lbl.strip():
-                        label_set.add(lbl.strip())
-
-            labels = sorted(label_set)
+            labels = _get_detection_label_options(task, result_model, relation_field)
         else:
             # 排除 None 或空字符串的标签
             labels = list(result_model.objects.filter(
@@ -729,8 +948,15 @@ def get_tasks(request):
         paginator = Paginator(tasks_queryset, page_size)
         page_obj = paginator.get_page(page)
 
+        results = list(page_obj.object_list)
+        for task_data in results:
+            task_data['progress'] = display_task_progress(
+                task_data.get('status'),
+                task_data.get('progress'),
+            )
+
         return JsonResponse({
-            'results': list(page_obj.object_list),
+            'results': results,
             'total': paginator.count
         }, safe=False)
     return JsonResponse({'error': 'Invalid method'}, status=405)
@@ -924,7 +1150,7 @@ def task_operation(request, task_id):
             'id': task.id,
             'name': task.name, # 返回名称
             'status': task.status,
-            'progress': task.progress,
+            'progress': display_task_progress(task.status, task.progress),
             'created_at': task.created_at.strftime('%Y-%m-%d %H:%M'),
             'task_type': task.get_task_type_display(),
             'description': task.description # 返回描述
@@ -932,6 +1158,7 @@ def task_operation(request, task_id):
 
     elif request.method == 'DELETE':
         # 终止关联的 Celery 任务，并尽量清除 broker/结果后端中的残留。
+        removed_queue_messages = 0
         if task.celery_task_id:
             from smartlabel.celery import app
             try:
@@ -948,44 +1175,39 @@ def task_operation(request, task_id):
             except Exception as e:
                 logger.warning(f"清理Celery结果后端失败 {task.celery_task_id}: {e}")
 
-            removed = _remove_task_message_from_broker(task.celery_task_id)
-            if removed:
-                logger.info("已从 Redis broker 队列移除 %s 条残留消息(task_id=%s)", removed, task.celery_task_id)
+            removed_queue_messages = _remove_task_message_from_broker(task.celery_task_id)
+            if removed_queue_messages:
+                logger.info("已从 Redis broker 队列移除 %s 条残留消息(task_id=%s)", removed_queue_messages, task.celery_task_id)
 
         # 删除上传的原始文件
         if task.data_file:
-            if os.path.exists(task.data_file.path):
-                os.remove(task.data_file.path)
-                logger.info(f"已删除数据文件: {task.data_file.path}")
+            _safe_remove_file(task.data_file.path, "数据文件")
 
         if task.label_file:
-            if os.path.exists(task.label_file.path):
-                os.remove(task.label_file.path)
-                logger.info(f"已删除标签文件: {task.label_file.path}")
+            _safe_remove_file(task.label_file.path, "标签文件")
 
         # 清理解压目录
         extracted_dir = Path(settings.MEDIA_ROOT) / 'extracted' / str(task_id)
-        if extracted_dir.exists():
-            shutil.rmtree(extracted_dir)
-            logger.info(f"已删除解压目录: {extracted_dir}")
+        _safe_remove_dir(extracted_dir, "解压")
 
         # 清除标签目录
         label_dir = Path(settings.MEDIA_ROOT) / 'extracted' / (str(task_id) + '_label')
-        if label_dir.exists():
-            shutil.rmtree(label_dir)
-            logger.info(f"已删除标签目录: {label_dir}")
+        _safe_remove_dir(label_dir, "标签")
 
         # 删除结果文件
         results_dir = Path(settings.MEDIA_ROOT) / 'results' / str(task_id)
-        if results_dir.exists():
-            shutil.rmtree(results_dir)
-            logger.info(f"已删除结果目录: {results_dir}")
+        _safe_remove_dir(results_dir, "结果")
 
         # 删除任务记录及相关结果 (结果记录会在 Task.delete() 时通过 CASCADE 自动删除)
         task.delete()
         logger.info(f"已删除任务记录: {task_id}")
 
-        return JsonResponse({'status': 'success'})
+        return JsonResponse({
+            'status': 'success',
+            'message': '任务已删除，后台队列已请求停止并清理',
+            'removed_queue_messages': removed_queue_messages,
+            'redirect_url': '/manage_task/',
+        })
 
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
@@ -1003,7 +1225,10 @@ def manual_annotation(request, task_id):
     relation_field = config['relation_field']
 
     stats = _get_label_verification_stats(task, result_model, relation_field)
-    total_count = result_model.objects.filter(**{relation_field: task}).count()
+    total_count = _stable_task_total_count(
+        task,
+        result_model.objects.filter(**{relation_field: task}).count()
+    )
     total_verifiable = stats.get('total_verifiable_count', total_count)
     verified = stats.get('verified_count', 0)
     verification_progress = round((verified / total_verifiable) * 100, 1) if total_verifiable > 0 else 0
@@ -1023,7 +1248,11 @@ def manual_annotation(request, task_id):
         'task_view_mode': 'manual',
         'task_page_title': '主动学习标注',
         'unlabeled_count': unlabeled_count,
-        'labels_json': json.dumps(list(task.label_list or [])),
+        'labels_json': json.dumps(
+            _get_detection_label_options(task, result_model, relation_field)
+            if task.task_type == 'object-detection'
+            else list(task.label_list or [])
+        ),
     })
 
     if task.task_type == 'text-classification':
@@ -1052,7 +1281,10 @@ def unlabeled_detail(request, task_id):
     relation_field = config['relation_field']
 
     stats = _get_label_verification_stats(task, result_model, relation_field)
-    total_count = result_model.objects.filter(**{relation_field: task}).count()
+    total_count = _stable_task_total_count(
+        task,
+        result_model.objects.filter(**{relation_field: task}).count()
+    )
     total_verifiable = stats.get('total_verifiable_count', total_count)
     verified = stats.get('verified_count', 0)
     verification_progress = round((verified / total_verifiable) * 100, 1) if total_verifiable > 0 else 0
@@ -1072,7 +1304,11 @@ def unlabeled_detail(request, task_id):
         'task_view_mode': 'unlabeled',
         'task_page_title': '未标注样本',
         'unlabeled_count': unlabeled_count,
-        'labels_json': json.dumps(list(task.label_list or [])),
+        'labels_json': json.dumps(
+            _get_detection_label_options(task, result_model, relation_field)
+            if task.task_type == 'object-detection'
+            else list(task.label_list or [])
+        ),
     })
 
     template_name = 'platform/tasks/detection_detail_h.html' if task.task_type == 'object-detection' else 'platform/tasks/unlabeled_detail_h.html'
@@ -1088,7 +1324,7 @@ def task_progress(request, task_id):
         heartbeat = cache.get(f"task:{task_id}:algo_heartbeat") or {}
         return JsonResponse({
             'status': task.status,
-            'progress': task.progress,
+            'progress': display_task_progress(task.status, task.progress),
             'error': task.error_log if task.status == 'failed' else None,
             'algorithm_last_log_at': heartbeat.get('at'),
             'algorithm_last_log': heartbeat.get('line'),
@@ -1115,7 +1351,10 @@ def task_detail(request, task_id):
     config = TASK_CONFIG[task.task_type]
     result_model = config['result_model']
     relation_field = config['relation_field']
-    total_count = result_model.objects.filter(**{relation_field: task}).count()
+    total_count = _stable_task_total_count(
+        task,
+        result_model.objects.filter(**{relation_field: task}).count()
+    )
 
     stats = _get_label_verification_stats(task, result_model, relation_field)
 
@@ -1168,10 +1407,11 @@ def task_detail(request, task_id):
         'is_favorite': is_favorite,  # 添加收藏状态
         'task_view_mode': 'labeled',
         'task_page_title': '已标注',
-        # 增加 if item.label 避免标签为None时出错
-        'labels_json': json.dumps(list(
-            set(item.label for item in items if item.label)
-        ))
+        'labels_json': json.dumps(
+            _get_detection_label_options(task, result_model, relation_field)
+            if task.task_type == 'object-detection'
+            else list(set(item.label for item in items if item.label))
+        )
     })
 
     return render(request, config['detail_template'], context)
@@ -1275,6 +1515,7 @@ def save_detection_annotations(request, task_id):
     item_id = payload.get('item_id')
     annotations = payload.get('annotations', [])
     sample_mode = payload.get('mode') or 'pre_annotation_check'
+    queue_version = payload.get('queue_version') or 1
 
     if not item_id:
         return JsonResponse({'status': 'error', 'message': '缺少 item_id'}, status=400)
@@ -1282,6 +1523,7 @@ def save_detection_annotations(request, task_id):
     try:
         model = TASK_CONFIG[task.task_type]['result_model']
         item = model.objects.get(id=item_id, task=task)
+        previous_annotations = list(item.annotations or [])
 
         # annotations 期望为 [{x,y,w,h,label}, ...]，来自前端的为左上角相对坐标 (0..1)
         # 将其转换为中心坐标形式 (xc,yc,w,h)，与训练脚本中使用的 YOLO 格式保持一致
@@ -1356,6 +1598,13 @@ def save_detection_annotations(request, task_id):
             # 如果转换出错，回退保存原始数据以避免丢失
             normalized_annotations = annotations
 
+        if sample_mode == 'manual_complete':
+            for annotation in normalized_annotations:
+                if not isinstance(annotation, dict):
+                    continue
+                if annotation.get('decision') != 'rejected':
+                    annotation['decision'] = 'accepted'
+
         item.annotations = normalized_annotations
         has_pending = any(
             (a.get('source') == 'model' and (a.get('decision') or 'pending') == 'pending')
@@ -1364,8 +1613,26 @@ def save_detection_annotations(request, task_id):
         item.status = 'unverified' if has_pending else 'verified'
         item.confidence = -1.0
         item.save(update_fields=['annotations', 'status', 'confidence'])
+        _sync_detection_task_labels(
+            task,
+            [a.get('label') for a in normalized_annotations if isinstance(a, dict)]
+        )
+        loop_update = None
+        if task.task_type == 'object-detection':
+            loop_update = apply_detection_loop_update(
+                task,
+                item,
+                previous_annotations,
+                normalized_annotations,
+                operator=request.user,
+                queue_version=queue_version,
+            )
 
-        return JsonResponse({'status': 'success', 'message': '标注已保存'})
+        return JsonResponse({
+            'status': 'success',
+            'message': '标注已保存',
+            'loop_update': loop_update,
+        })
     except model.DoesNotExist:
         return JsonResponse({'status': 'error', 'message': '记录不存在'}, status=404)
     except Exception as e:
@@ -1774,6 +2041,15 @@ def task_data(request, task_id):
     sort = request.GET.get('sort', '')
 
     queryset = result_model.objects.filter(**{relation_field: task})
+    if task.task_type == 'object-detection':
+        manual_same_image = result_model.objects.filter(
+            **{relation_field: task},
+            image_name=OuterRef('image_name'),
+            confidence=-1,
+        )
+        queryset = queryset.annotate(
+            has_manual_same_image=Exists(manual_same_image)
+        ).exclude(Q(has_manual_same_image=True) & ~Q(confidence=-1))
     uncertainty_scores = {}
     if task.task_type in ('image-classification', 'object-detection'):
         uncertainty_scores = _load_image_uncertainty_scores(task)
@@ -1917,8 +2193,23 @@ def task_data(request, task_id):
             # 未知排序字段回退到“最新优先”
             queryset = queryset.order_by('-created_at', '-id')
     else:
-        # 默认按进入标注界面的顺序（最新进入在最前）
-        queryset = queryset.order_by('-created_at', '-id')
+        if task.task_type == 'object-detection':
+            queryset_list = list(queryset)
+
+            def _detection_review_sort_key(item):
+                score = uncertainty_scores.get(getattr(item, 'image_name', ''), None)
+                if score is None:
+                    try:
+                        score = max(0.0, 1.0 - float(item.confidence)) if item.confidence != -1 else 0.0
+                    except (TypeError, ValueError):
+                        score = 0.0
+                return score
+
+            queryset_list.sort(key=_detection_review_sort_key, reverse=True)
+            queryset = queryset_list
+        else:
+            # 默认按进入标注界面的顺序（最新进入在最前）
+            queryset = queryset.order_by('-created_at', '-id')
 
     paginator = Paginator(queryset, page_size)
 
@@ -1974,7 +2265,11 @@ def task_data(request, task_id):
             result['relative_image_url'] = item.relative_image_url
             result['image_name'] = item.image_name
             # 包含目标检测标注数据（如果存在）
-            result['annotations'] = item.annotations or []
+            result['annotations'] = (
+                _filter_detection_annotations_for_display(item, item.annotations or [])
+                if task.task_type == 'object-detection'
+                else item.annotations or []
+            )
             result['is_manual_annotation'] = is_manual_annotation
             uncertainty_score = uncertainty_scores.get(item.image_name)
             if uncertainty_score is None:
@@ -2007,7 +2302,10 @@ def get_task_stats(request, task_id):
     relation_field = config['relation_field']
 
     stats = _get_label_verification_stats(task, result_model, relation_field)
-    total_count = result_model.objects.filter(**{relation_field: task}).count()
+    total_count = _stable_task_total_count(
+        task,
+        result_model.objects.filter(**{relation_field: task}).count()
+    )
 
     # 如果数据库中尚未写入样本（例如任务刚提交，后台尚未处理），
     # 则回退到根据上传的解压目录估算总样本数，便于前端立刻显示上传数量。
@@ -2036,11 +2334,15 @@ def get_task_stats(request, task_id):
                     total_count = sum(1 for p in extract_path.rglob('*') if p.is_file() and not p.name.startswith('.'))
         except Exception:
             # 出错时保留原始 total_count（0）
-            total_count = result_model.objects.filter(**{relation_field: task}).count()
+            total_count = _stable_task_total_count(
+                task,
+                result_model.objects.filter(**{relation_field: task}).count()
+            )
 
     total_verifiable = stats.get('total_verifiable_count', total_count)
     verified = stats.get('verified_count', 0)
     unverified = stats.get('unverified_count', 0)
+    unlabeled = stats.get('unlabeled_count', unverified)
     manual_annotated_count = stats.get('manual_annotated_count', stats.get('total_labeled_count', 0))
     verification_progress = stats.get('verification_progress', 0)
 
@@ -2050,6 +2352,7 @@ def get_task_stats(request, task_id):
         'stats': {
             'verified_count': verified,
             'unverified_count': unverified,
+            'unlabeled_count': unlabeled,
             'manual_annotated_count': manual_annotated_count,
             'total_count': total_count,
             'total_verifiable_count': total_verifiable,

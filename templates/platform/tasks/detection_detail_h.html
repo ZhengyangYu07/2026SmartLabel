@@ -173,10 +173,10 @@
     pointer-events: auto;
   }
   .bbox-source-model { border-color: #2563eb; border-style: dashed; }
-  .bbox-status-accepted { border-color: #16a34a; border-style: solid; }
   .bbox-status-modified,
   .bbox-status-manual,
   .bbox-source-manual { border-color: #eab308; border-style: solid; }
+  .bbox-status-accepted { border-color: #16a34a; border-style: solid; }
   .bbox-status-rejected {
     border-color: #dc2626;
     border-style: solid;
@@ -194,19 +194,23 @@
   }
   .bbox-status-rejected::before { transform: rotate(32deg); }
   .bbox-status-rejected::after { transform: rotate(-32deg); }
-  .bbox-low-confidence {
-    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.9);
+  .bbox-source-model.bbox-status-pending.bbox-low-confidence {
+    border-color: #f97316;
+    border-style: dashed;
+    box-shadow: none;
   }
-  .bbox-active,
+  .bbox-active {
+    z-index: 4;
+  }
   .bbox-draft { border-style: dashed; border-color: #ffcc00; }
   .bbox-handle {
     position: absolute;
     width: 9px;
     height: 9px;
-    border: 2px solid #fff;
+    border: 2px solid #111827;
     border-radius: 50%;
-    background: #ffcc00;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+    background: #fff;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.85);
     display: none;
     z-index: 3;
   }
@@ -279,7 +283,11 @@
     font-size: 13px;
     font-weight: 700;
   }
-  .lm-dock-body { min-height: 0; overflow: auto; }
+  .lm-dock-body {
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow: auto;
+  }
   .det-panel {
     min-height: 0;
     display: none;
@@ -622,5 +630,5 @@
     }, 2200);
   };
 </script>
-<script src="{% static 'js/detection_labelme.js' %}?v=20260517-detection-filter"></script>
+<script src="{% static 'js/detection_labelme.js' %}?v=20260907-no-auto-select"></script>
 {% endblock %}

@@ -1,37 +1,64 @@
-# pip install -r requirements.txt
-
-# Base ----------------------------------------
-matplotlib>=3.2.2
-numpy>=1.18.5
-opencv-python>=4.1.2
-Pillow>=7.1.2
-PyYAML>=5.3.1
-requests>=2.23.0
-scipy>=1.4.1
-torch>=1.9.0
-torchvision>=0.8.1
-tqdm>=4.41.0
-
-# Logging -------------------------------------
-tensorboard>=2.4.1
-# wandb
-
-
-# Plotting ------------------------------------
-pandas>=1.1.4
-seaborn>=0.11.0
-
-# Export --------------------------------------
-# coremltools>=4.1  # CoreML export
-# onnx>=1.9.0  # ONNX export
-onnx-simplifier>=0.3.6  # ONNX simplifier
-# scikit-learn==0.19.2  # CoreML quantization
-# tensorflow>=2.4.1  # TFLite export
-# tensorflowjs>=3.9.0  # TF.js export
-
-# Extras --------------------------------------
-# albumentations>=1.0.3
-# Cython  # for pycocotools https://github.com/cocodataset/cocoapi/issues/172
-# pycocotools>=2.0  # COCO mAP
-# roboflow
-thop  # FLOPs computation
+absl-py==2.4.0
+brotlicffi @ file:///C:/miniconda3/conda-bld/brotlicffi_1764961372591/work
+certifi==2026.4.22
+cffi @ file:///C:/miniconda3/conda-bld/cffi_1761832794697/work
+charset-normalizer @ file:///C:/miniconda3/conda-bld/charset-normalizer_1761744944645/work
+colorama==0.4.6
+contourpy==1.3.2
+cycler==0.12.1
+filelock @ file:///C:/Users/task_176943980686702/croot/filelock_1769440565956/work
+fonttools==4.63.0
+fsspec==2026.4.0
+gmpy2 @ file:///C:/miniconda3/conda-bld/gmpy2_1764748105976/work
+grpcio==1.80.0
+idna==3.15
+Jinja2 @ file:///C:/b/abs_920kup4e6u/croot/jinja2_1741711580669/work
+joblib==1.5.3
+kiwisolver==1.5.0
+Markdown==3.10.2
+markdown-it-py==4.2.0
+MarkupSafe @ file:///C:/b/abs_a0ma7ge0jc/croot/markupsafe_1738584052792/work
+matplotlib==3.10.9
+mdurl==0.1.2
+mkl-service==2.4.0
+mkl_fft @ file:///C:/Users/dev-admin/mkl/mkl_fft_1730823082242/work
+mkl_random @ file:///C:/Users/dev-admin/mkl/mkl_random_1730822522280/work
+ml_dtypes==0.5.4
+mpmath @ file:///C:/b/abs_7833jrbiox/croot/mpmath_1690848321154/work
+networkx @ file:///C:/b/abs_b054htfn9t/croot/networkx_1737043671910/work
+numpy @ file:///C:/b/abs_0123vcxhf8/croot/numpy_and_numpy_base_1725470331966/work/dist/numpy-2.0.1-cp310-cp310-win_amd64.whl#sha256=e824ec3b279f4c5207736c83ac2f2dc79b489e08501a4ea9e3fc178c45db289b
+onnx==1.21.0
+onnx-simplifier==0.5.0
+onnxsim==0.6.3
+opencv-python==4.13.0.92
+packaging==26.0
+pandas==2.3.3
+pillow @ file:///C:/b/abs_b50vowcrzo/croot/pillow_1738010273782/work
+protobuf==7.34.1
+pycparser @ file:///C:/Users/task_177495971250430/croot/pycparser_1774959822609/work
+Pygments==2.20.0
+pyparsing==3.3.2
+PySocks @ file:///C:/miniconda3/conda-bld/pysocks_1761753030270/work
+python-dateutil==2.9.0.post0
+pytz==2026.2
+PyYAML @ file:///C:/miniconda3/conda-bld/pyyaml_1763465513320/work
+requests==2.34.1
+rich==15.0.0
+scikit-learn==1.7.2
+scipy==1.15.3
+seaborn==0.13.2
+six==1.17.0
+sympy @ file:///C:/miniconda3/conda-bld/sympy_1764762978780/work
+tensorboard==2.20.0
+tensorboard-data-server==0.7.2
+thop==0.1.1.post2209072238
+threadpoolctl==3.6.0
+torch==2.5.1
+torchaudio==2.5.1
+torchvision==0.20.1
+tqdm==4.67.3
+typing_extensions @ file:///C:/b/abs_ecq8gc0vbm/croot/typing_extensions_1756281142218/work
+tzdata==2026.2
+urllib3 @ file:///C:/Users/task_177853593812673/croot/urllib3_1778536217005/work
+Werkzeug==3.1.8
+win_inet_pton @ file:///C:/miniconda3/conda-bld/win_inet_pton_1761746276406/work

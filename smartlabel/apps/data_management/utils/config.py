@@ -55,6 +55,18 @@ TASK_CONFIG = {
 }
 
 
+def display_task_progress(status, progress):
+    """任务未真正完成时，前端最多展示到 99%。"""
+    try:
+        progress_value = float(progress or 0)
+    except (TypeError, ValueError):
+        progress_value = 0
+    progress_value = max(0, min(progress_value, 100))
+    if status != 'completed' and progress_value >= 100:
+        return 99
+    return progress_value
+
+
 class TaskService:
     def __init__(self):
         pass
@@ -67,6 +79,7 @@ class TaskService:
         relation_field = config['relation_field']
         total_count = result_model.objects.filter(**{relation_field: task}).count()
         task.total_count = total_count
+        task.progress = display_task_progress(task.status, task.progress)
         return {
             'task': task,
             'total_tasks': Task.objects.count(),

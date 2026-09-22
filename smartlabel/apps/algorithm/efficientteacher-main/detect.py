@@ -337,7 +337,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
                 root.append(xml_image)
 
             # Print time (inference-only)
-            print(f'{s}Done. ({t3 - t2:.3f}s)')
+            print(f'{s}Done. ({t3 - t2:.3f}s)', flush=True)
 
             # Stream results
             im0 = annotator.result()

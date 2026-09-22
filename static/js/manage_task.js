@@ -490,11 +490,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
           if (progressChanged) {
             elements.percent.textContent = `${data.progress.toFixed(1)}%`;
+            elements.fill.style.transition = "width 0.8s ease";
             elements.fill.style.width = `${data.progress}%`;
-
-            elements.fill.style.transition = "none";
-            void elements.fill.offsetWidth;
-            elements.fill.style.transition = "width 0.3s ease";
           }
 
           if (statusChanged) {

@@ -130,6 +130,111 @@ class ImageResult(models.Model):
         unique_together = ('task', 'sequence_number',)
 
 
+class PositiveIndex(models.Model):
+    SOURCE_CHOICES = (
+        ('manual_positive', '人工确认正样本'),
+        ('miss_fix', '漏检补框样本'),
+    )
+
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='positive_index_entries')
+    image_result = models.ForeignKey(ImageResult, on_delete=models.CASCADE, related_name='positive_index_entries')
+    sample_id = models.CharField(max_length=128, verbose_name='样本标识')
+    image_name = models.CharField(max_length=512, verbose_name='图片名称')
+    class_label = models.CharField(max_length=255, verbose_name='人工确认类别')
+    feature_vector = JSONField(default=list, verbose_name='图像特征向量')
+    source_type = models.CharField(max_length=32, choices=SOURCE_CHOICES, verbose_name='来源类型')
+    index_version = models.PositiveIntegerField(default=1, verbose_name='索引版本')
+    is_active = models.BooleanField(default=True, verbose_name='是否可用于队列生成')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='写入时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['task', 'source_type']),
+            models.Index(fields=['task', 'index_version']),
+            models.Index(fields=['task', 'class_label']),
+        ]
+        unique_together = ('task', 'image_result', 'class_label', 'source_type')
+
+    def __str__(self):
+        return f"{self.task_id}:{self.image_name}:{self.class_label}:{self.source_type}@{self.index_version}"
+
+
+class MissFixTable(models.Model):
+    INDEX_STATUS_CHOICES = (
+        ('pending', '待写入'),
+        ('written', '已写入'),
+        ('failed', '写入失败'),
+    )
+
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='miss_fix_events')
+    image_result = models.ForeignKey(ImageResult, on_delete=models.CASCADE, related_name='miss_fix_events')
+    sample_id = models.CharField(max_length=128, verbose_name='样本标识')
+    manual_bbox = JSONField(default=list, verbose_name='人工补充框')
+    manual_class = models.CharField(max_length=255, verbose_name='人工补充类别')
+    operator = models.ForeignKey(User, on_delete=models.SET_NULL, blank=True, null=True, related_name='miss_fix_events')
+    fixed_at = models.DateTimeField(auto_now_add=True, verbose_name='补框时间')
+    pre_fix_box_count = models.PositiveIntegerField(default=0, verbose_name='补框前最终检测框数量')
+    source_queue_version = models.PositiveIntegerField(default=1, verbose_name='来源队列版本')
+    index_write_status = models.CharField(max_length=20, choices=INDEX_STATUS_CHOICES, default='pending', verbose_name='索引写入状态')
+    positive_index_version = models.PositiveIntegerField(default=0, verbose_name='对应索引版本')
+    error_message = models.TextField(blank=True, verbose_name='失败原因')
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['task', 'index_write_status']),
+            models.Index(fields=['task', 'positive_index_version']),
+            models.Index(fields=['sample_id']),
+        ]
+
+    def __str__(self):
+        return f"{self.task_id}:{self.image_name if hasattr(self, 'image_name') else self.sample_id}:{self.manual_class}"
+
+
+class ReviewQueueCache(models.Model):
+    BRANCH_CHOICES = (
+        ('boxed', '有框候选图像'),
+        ('final_empty', '最终无框候选图像'),
+    )
+    CACHE_STATUS_CHOICES = (
+        ('fresh', '有效'),
+        ('needs_recompute', '待重算'),
+        ('invalidated', '已失效'),
+    )
+
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='review_queue_items')
+    image_result = models.ForeignKey(ImageResult, on_delete=models.CASCADE, related_name='review_queue_items')
+    sample_id = models.CharField(max_length=128, verbose_name='样本标识')
+    branch_type = models.CharField(max_length=32, choices=BRANCH_CHOICES, verbose_name='分支类型')
+    review_score = models.FloatField(default=0.0, verbose_name='最终复核分数')
+    candidate_chaos = models.FloatField(default=0.0, verbose_name='候选混乱度')
+    positive_similarity = models.FloatField(default=0.0, verbose_name='正样本相似度')
+    pre_filter_response = models.FloatField(default=0.0, verbose_name='候选过滤前响应')
+    image_quality = models.FloatField(default=0.0, verbose_name='图像质量')
+    class_balance = models.FloatField(default=0.0, verbose_name='类别补偿值')
+    diversity = models.FloatField(default=0.0, verbose_name='多样性值')
+    weight_version = models.PositiveIntegerField(default=1, verbose_name='权重版本')
+    index_version_snapshot = models.PositiveIntegerField(default=0, verbose_name='索引版本快照')
+    trigger_reason = models.CharField(max_length=255, blank=True, verbose_name='触发原因')
+    queue_version = models.PositiveIntegerField(default=1, verbose_name='队列版本')
+    cache_status = models.CharField(max_length=32, choices=CACHE_STATUS_CHOICES, default='fresh', verbose_name='缓存状态')
+    score_detail = JSONField(default=dict, blank=True, verbose_name='评分详情')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['task', 'branch_type', 'cache_status']),
+            models.Index(fields=['task', 'queue_version']),
+            models.Index(fields=['task', 'index_version_snapshot']),
+            models.Index(fields=['review_score']),
+        ]
+        unique_together = ('task', 'image_result', 'queue_version')
+
+    def __str__(self):
+        return f"{self.task_id}:{self.sample_id}:{self.branch_type}:{self.review_score}"
+
+
 class TextResult(models.Model):
     # 定义 TextResult 自己的状态 Choices
     ITEM_STATUS_CHOICES = (
@@ -183,4 +288,3 @@ class FavoriteTask(models.Model):
 
     def __str__(self):
         return f"{self.user.username}收藏的任务: {self.task.name}"
-

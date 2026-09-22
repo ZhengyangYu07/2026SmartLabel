@@ -176,7 +176,9 @@
       <div class="flex flex-col">
         <dt class="text-gray-600">总计</dt>
         <dd id="total-verifiable-count" class="font-medium">
-          {% if task.task_type == 'text-classification' and task_view_mode == 'labeled' %} 
+          {% if task.task_type == 'object-detection' %}
+          {{ task.uploaded_total|default:task.total_count|default:"0" }}
+          {% elif task.task_type == 'text-classification' and task_view_mode == 'labeled' %} 
           {{ task.manual_annotated_count|default:"0" }} 
           {% elif task.task_type == 'text-classification' and task_view_mode == 'manual'%} 
           {{ unlabeled_count|default:"0" }} {% elif task_view_mode == 'unlabeled' %} 
@@ -362,14 +364,9 @@
         const statusChanged = newStatus !== lastStatus;
 
         if (progressChanged) {
-          // 暂时移除过渡效果以防止抖动
-          progressBar.style.transition = "none";
+          progressBar.style.transition = "width 0.8s ease-out";
           progressBar.style.width = `${newProgress}%`;
           percentageSpan.textContent = `${newProgress.toFixed(1)}%`; // 显示一位小数
-          // 强制浏览器重绘以应用无过渡的样式
-          void progressBar.offsetWidth;
-          // 恢复过渡效果
-          progressBar.style.transition = "width 0.3s ease-out";
           lastProgress = newProgress;
         }
 
@@ -650,9 +647,10 @@
       }
 
       showMessage(data.message || "任务已删除", "success", 2000);
-      setTimeout(() => {
-        location.href = "{% url 'manage_task' %}";
-      }, 900);
+      taskPollingIntervals.forEach((intervalId) => clearInterval(intervalId));
+      taskPollingIntervals.clear();
+      location.replace(data.redirect_url || "{% url 'manage_task' %}");
+      return;
     } catch (error) {
       console.error("删除任务失败:", error);
       showMessage(error.message || "删除失败", "error");

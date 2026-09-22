@@ -44,6 +44,7 @@
 
   const LOW_CONFIDENCE = 0.6;
   const ACTIVE_UNCERTAINTY = 0.5;
+  const PLACEHOLDER_LABEL = "obj";
 
   const container = document.getElementById("draw-canvas-container");
   const imageEl = document.getElementById("detection-image");
@@ -506,7 +507,9 @@
     const shapeType = annotation.shape_type || "rectangle";
     const hasModelConfidence = annotation.confidence !== undefined && annotation.confidence !== null && annotation.confidence !== "";
     const source = annotation.source || (hasModelConfidence || item?.confidence !== "-1.000" ? "model" : "manual");
-    const decision = annotation.decision || annotation.annotation_status || (source === "model" ? "pending" : "manual");
+    let decision = annotation.decision || annotation.annotation_status || (source === "model" ? "pending" : "manual");
+    const isManualVerifiedItem = item?.confidence === "-1.000" && (item?.raw_status === "verified" || item?.status === TXT.verified);
+    if (isManualVerifiedItem && decision !== "rejected") decision = "accepted";
     const base = {
       shape_type: shapeType,
       label: annotation.label || "",
@@ -601,7 +604,7 @@
     }));
     shapes.forEach(renderShape);
     rerenderShapes();
-    selectShape(sortedShapeEntries()[0]?.shape || shapes[0] || null);
+    selectShape(null);
     updateShapePanel();
   }
 
@@ -665,10 +668,28 @@
     if (!value || loadedLabels.includes(value)) return;
     loadedLabels.push(value);
     loadedLabels.sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+    removePlaceholderLabel();
+  }
+
+  function hasRealLoadedLabel() {
+    return loadedLabels.some((label) => label !== PLACEHOLDER_LABEL);
+  }
+
+  function removePlaceholderLabel() {
+    if (!hasRealLoadedLabel()) return;
+    loadedLabels = loadedLabels.filter((label) => label !== PLACEHOLDER_LABEL);
+  }
+
+  function clearPlaceholderShapeLabels() {
+    if (!hasRealLoadedLabel()) return;
+    shapes.forEach((shape) => {
+      if (shape.label === PLACEHOLDER_LABEL) shape.label = "";
+    });
   }
 
   function refreshLabelSelectOptions(selectedValue = null) {
     if (!labelSelect) return;
+    removePlaceholderLabel();
     const currentValue = selectedValue ?? labelSelect.value;
     labelSelect.innerHTML = `<option value="">${TXT.chooseLabel}</option>`;
     loadedLabels.forEach((label) => {
@@ -688,6 +709,12 @@
   function collectLabelsFromShapes(shapeList) {
     shapeList.forEach((shape) => rememberLabel(shape.label));
     refreshLabelSelectOptions(labelSelect?.value || shapeList[0]?.label || null);
+  }
+
+  function seedTaskLabels() {
+    if (!Array.isArray(window.detectionTaskLabels)) return;
+    window.detectionTaskLabels.forEach(rememberLabel);
+    refreshLabelSelectOptions();
   }
 
   function matchingLabels(searchText) {
@@ -821,6 +848,7 @@
 
   async function loadLabels() {
     if (labelSelect) labelSelect.innerHTML = `<option value="">${TXT.chooseLabel}</option>`;
+    seedTaskLabels();
     try {
       const response = await fetch(`/api/tasks/${taskId}/meta_data/`);
       const data = await response.json();
@@ -852,8 +880,8 @@
       modeBadge.classList.toggle("ok", !active);
     }
     if (acceptAllBtn) {
-      acceptAllBtn.disabled = active;
-      acceptAllBtn.title = active ? TXT.acceptAllWarn : "";
+      acceptAllBtn.disabled = false;
+      acceptAllBtn.title = "";
     }
     if (sampleUncertainty) sampleUncertainty.textContent = fmt(uncertainty, 4);
     if (sampleStrategy) sampleStrategy.textContent = active ? "Entropy / Margin" : "Pseudo Label";
@@ -889,6 +917,7 @@
     clearOverlays();
     shapes = Array.isArray(item.annotations) ? item.annotations.map((annotation) => annotationToShape(annotation, item)) : [];
     collectLabelsFromShapes(shapes);
+    clearPlaceholderShapeLabels();
 
     imageEl.src = item.relative_image_url || item.image_url || "";
     currentName.textContent = item.image_name || TXT.unnamed;
@@ -908,7 +937,7 @@
       setZoom(1);
       shapes.forEach(renderShape);
       rerenderShapes();
-      selectShape(sortedShapeEntries()[0]?.shape || shapes[0] || null);
+      selectShape(null);
       updateShapePanel();
       centerCanvas();
     };
@@ -1088,6 +1117,9 @@
       window.showMessage(TXT.saveFirst, "warning");
       return;
     }
+    shapes.forEach((shape) => {
+      if (shape.decision !== "rejected") shape.decision = "accepted";
+    });
     const nextItem = currentItemIndex >= 0 ? currentItems[currentItemIndex + 1] : null;
     const nextIndex = currentItemIndex >= 0 ? currentItemIndex : 0;
     const nextPage = nextItem ? currentPage : Math.min(currentPage + 1, currentTotalPages);
@@ -1192,10 +1224,6 @@
   completeImageBtn?.addEventListener("click", completeCurrentImage);
   undoBtn?.addEventListener("click", undoLastStep);
   acceptAllBtn?.addEventListener("click", () => {
-    if (isActiveLearningSample()) {
-      window.showMessage(TXT.acceptAllWarn, "warning");
-      return;
-    }
     pushUndo();
     shapes.forEach((shape) => {
       if (shape.source === "model" && shape.decision !== "rejected") shape.decision = "accepted";
@@ -1374,8 +1402,8 @@
     updateShapePanel();
   });
 
-  document.addEventListener("DOMContentLoaded", () => {
-    loadLabels();
+  document.addEventListener("DOMContentLoaded", async () => {
+    await loadLabels();
     setTool("rectangle");
     if (sortSelect) sortSelect.value = "uncertainty:desc";
     loadDetectionPage(1);

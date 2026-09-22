@@ -246,7 +246,7 @@
                   class="text-xs text-gray-400 mt-1"
                 >
                   支持 .json（COCO）或
-                  .csv（filename,xmin,ymin,xmax,ymax,class）
+                  .csv（filename,xmin,ymin,xmax,ymax,class 或 image,bounds）
                 </p>
               </div>
             </template>
@@ -279,16 +279,6 @@
             <option value="small">低</option>
             <option value="medium">中</option>
             <option value="high">高</option>
-          </select>
-        </div>
-
-        <div x-show="showObjectDetection && task_type === 'object-detection'" class="mt-4">
-          <label class="block text-sm text-gray-600 mb-1">检测算法选择</label>
-          <select
-            name="model_choice"
-            class="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-400 focus:border-blue-400"
-          >
-            <option value="efficientteacher">EfficientTeacher (YOLOv5)</option>
           </select>
         </div>
       </div>
