@@ -1,3 +1,9 @@
+/**
+ * 文本明细页样式（text_detail）。
+ * 作用于文本数据集表格：表头筛选/排序下拉、文本内容列、预测标签的编辑与建议列表、
+ * 列宽设定、校验状态标签，以及操作模态框、去噪处理、全局加载覆盖层与屏幕点击覆盖层。
+ */
+
 /* 设置表格宽度为固定大小 */
 table {
     width: 100%;
@@ -156,6 +162,7 @@ td:nth-child(2) {
     width: 350px;
 }
 
+/* 文本内容列：单行省略号截断，可点击查看 */
 .text-content {
     cursor: pointer;
     text-align: left;
@@ -343,6 +350,7 @@ td:nth-child(6) button {
     animation: spin 1s linear infinite;
 }
 
+/* 加载动画：圆环旋转 */
 @keyframes spin {
     0% {
         transform: rotate(0deg);
@@ -397,6 +405,7 @@ td:nth-child(6) button {
     color: white;
 }
 
+/* 校验状态标签：已校验 / 未校验 / 已标注 */
 .status-verified {
     background-color: #d4edda !important;
     color: #155724 !important;
@@ -429,6 +438,7 @@ td[data-status] {
     vertical-align: middle;
 }
 
+/* 全局加载覆盖层（配合 showGlobalLoading/hideGlobalLoading） */
 .loading-overlay {
     position: fixed;
     top: 0;
@@ -456,6 +466,7 @@ td[data-status] {
     100% { transform: rotate(360deg); }
 }
 
+/* 标签建议下拉列表（编辑标签时的联想候选） */
 ul.selectedId {
     position: absolute;
     background-color: white;
@@ -486,6 +497,7 @@ ul.selectedId li:hover {
     background-color: #f0f0f0;
 }
 
+/* 表格容器：保证最小高度，避免内容少时页面塌陷 */
 .overflow-x-auto {
     min-height: 300px;
     display: flex;
@@ -499,6 +511,7 @@ table tbody tr td[colspan] {
     padding: 20px;
 }
 
+/* 屏幕点击覆盖层：点击下拉菜单外部时关闭它 */
 .screen-overlay {
     position: fixed;
     top: 0;

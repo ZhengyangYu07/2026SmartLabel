@@ -1,8 +1,17 @@
+"""
+用户应用的路由表。
+
+分三组：
+- 认证与首页：欢迎页、登录、注册、找回密码、主页；
+- 用户手册：introduction / basicfunction / homepage / task / confirm / faq 等静态帮助页；
+- 个人中心：个人信息、修改密码、任务创建与管理入口、意见反馈。
+"""
 from django.urls import path
 
 from . import views
 
 urlpatterns = [
+    # 认证与首页
     path('', views.welcome, name='welcome'),
     path('user_login/', views.user_login, name='user_login'),
     path('user_register/', views.user_register, name='user_register'),
@@ -20,7 +29,7 @@ urlpatterns = [
     path('user_guide/confirm/image/classify', views.user_guide_confirm_image_classify, name='user_guide_confirm_image_classify'),
     path('user_guide/confirm/text/classify', views.user_guide_confirm_text_classify, name='user_guide_confirm_text_classify'),
     path('user_guide/faq/', views.user_guide_faq, name='user_guide_faq'),
-    # 个人
+    # 个人中心
     path('profile/', views.profile, name='profile'),
     path('change_password/', views.change_password, name='change_password'),
     path('create_task/', views.create_task, name='create_task'),

@@ -1,3 +1,4 @@
+<!-- 任务详情基础模板：操作栏（返回/收藏/导出/删除/重训/视图切换）+ 任务信息与进度统计 + 子模板表格区 -->
 {% extends 'platform/components/base.html' %} {% load static %} {% block title%}
 {{ task.name }} - {% endblock %} {% block task_page_title %} 任务详情
 {%endblock%} {% block breadcrumb %}
@@ -11,6 +12,7 @@
 {% endblock %} {% block css %}
 <link rel="stylesheet" href="{% static 'css/base_task_detail.css' %}" />
 {% endblock %} {% block task_details %}{% endblock %} {% block content %}
+<!-- 顶部操作栏：返回列表 / 收藏 / 导出 / 删除 / 重新训练 / 视图切换 -->
 <div
   class="bg-gradient-to-b from-purple-900 to-blue-800 text-white shadow-lg rounded-lg mb-4"
 >
@@ -121,6 +123,7 @@
   </div>
 </div>
 
+<!-- 任务基本信息与进度统计（任务类型/状态/进度条/校验统计） -->
 <div class="w-full mb-6">
   <div class="bg-gray-50 p-4 rounded-lg space-y-4">
     <h2 class="text-xl font-bold mb-2">{{ task.name }}</h2>
@@ -207,6 +210,7 @@
 
 {% block task_table %}{% endblock %}
 
+<!-- 全局加载遮罩 -->
 <div
   id="global-loading-indicator"
   class="loading-overlay"

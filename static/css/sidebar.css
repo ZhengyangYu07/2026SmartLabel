@@ -1,3 +1,9 @@
+/**
+ * 全局侧边栏样式（sidebar）。
+ * 作用于左侧导航栏的折叠状态、全局下拉框外观、文件上传区域悬停效果，
+ * 以及全局成功提示（toast）样式。
+ */
+
 /* 折叠状态样式 */
 .sidebar-collapsed {
     width: 4rem !important;
@@ -23,6 +29,7 @@
     content: "\f061";
 }
 
+/* 全局下拉框：自定义蓝色箭头并去除系统默认外观 */
 select {
     background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%233b82f6'%3e%3cpath d='M7 10l5 5 5-5z'/%3e%3c/svg%3e");
     background-repeat: no-repeat;

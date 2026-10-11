@@ -1,4 +1,5 @@
 {% extends 'platform/components/base_task_h.html' %} {% load static %} {% block task_page_title %}人工标注{% endblock %} {% block task_details %}
+<!-- 人工标注页：从待标注候选中选样本，预览图片并填写人工标签 -->
 <style>
   .candidate-item.active {
     border-color: #2563eb;
@@ -7,6 +8,7 @@
 </style>
 {% endblock %} {% block task_table %}
 
+<!-- 待标注候选列表（按不确定性排序） -->
 <div
   class="grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] gap-4 min-h-[760px]"
 >
@@ -35,6 +37,7 @@
     ></div>
   </aside>
 
+  <!-- 样本预览与人工标签编辑区 -->
   <main
     class="bg-white rounded-xl border border-gray-200 shadow-sm p-5 flex flex-col gap-5"
   >

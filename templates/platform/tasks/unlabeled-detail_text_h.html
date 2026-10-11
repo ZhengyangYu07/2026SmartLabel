@@ -1,4 +1,5 @@
 {% extends 'platform/components/base_task_h.html' %} {% block task_page_title%}未标注{% endblock %} {% block task_details %}
+<!-- 文本分类-未标注页：从候选文本中选样本，预览并填写人工标签后保存 -->
 <style>
   .candidate-item {
     cursor: pointer;
@@ -18,6 +19,7 @@
   }
 </style>
 {% endblock %} {% block task_table %}
+<!-- 页面说明横幅 -->
 <div
   class="mb-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800"
 >
@@ -28,6 +30,7 @@
   </div>
 </div>
 
+<!-- 待标注候选列表（按不确定性/置信度排序） -->
 <div
   class="grid grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)] gap-4 min-h-[760px]"
 >
@@ -67,6 +70,7 @@
     ></div>
   </aside>
 
+  <!-- 文本预览与人工标签编辑区 -->
   <main
     class="bg-white rounded-xl border border-gray-200 shadow-sm p-5 flex flex-col gap-5"
   >

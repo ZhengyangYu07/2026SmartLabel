@@ -1,3 +1,15 @@
+"""
+数据管理应用的路由表（接口地图）。
+
+按功能分组：
+- 任务草稿的读取/保存/提交/清空、首页统计、数据文件校验；
+- 任务列表与进度查询、收藏；
+- 任务详情、标签更新、导出、单条复核；
+- 人工标注（含补充未标注样本、重跑半监督）；
+- 目标检测标注保存与 LabelMe 格式导出。
+
+命名约定：以 `api/` 开头的路径返回 JSON，其余路径渲染页面。
+"""
 from django.urls import path
 
 from . import views
@@ -25,6 +37,7 @@ urlpatterns = [
     path('tasks/<int:task_id>/manual_annotation/add_unlabeled/', views.add_unlabeled_to_labeled, name='add_unlabeled_to_labeled'),
     path('tasks/<int:task_id>/manual_annotation/rerun/', views.rerun_semi_supervised, name='rerun_semi_supervised'),
 
+    # 收藏路由配置
     path('api/tasks/<int:task_id>/favorite/', views.toggle_favorite, name='toggle_favorite'),
     path('api/tasks/<int:task_id>/check_favorite/', views.check_favorite, name='check_favorite'),
     path('api/favorites/', views.get_favorites, name='get_favorites'),
@@ -39,6 +52,7 @@ urlpatterns = [
     path('tasks/<int:task_id>/export/', views.export_data, name='export_data'),
     path('tasks/<int:task_id>/verify/', views.verify_item, name='verify_item'),
     path('tasks/<int:task_id>/data/', views.task_data, name='task_data'),
+    # 目标检测标注保存与 LabelMe 导出路由配置
     path('tasks/<int:task_id>/detection/save/', views.save_detection_annotations, name='save_detection_annotations'),
     path('tasks/<int:task_id>/detection/export_labelme/', views.export_detection_labelme, name='export_detection_labelme'),
 ]

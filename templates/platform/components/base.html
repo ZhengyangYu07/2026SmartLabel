@@ -1,4 +1,5 @@
 {% load static %}
+<!-- 基础模板：左侧边栏 + 顶部导航 + 内容区布局，各页面通过 block 继承 -->
 <!DOCTYPE html>
 <html lang="zh-Hans">
 <head>
@@ -27,16 +28,19 @@
 
         <!-- 主菜单列表区 -->
         <nav class="flex-1 p-2 space-y-1 overflow-y-auto">
+            <!-- 首页入口 -->
             <a href="{% url 'homepage' %}"
                class="menu-item flex items-center p-3 text-gray-300 hover:bg-purple-700/20 rounded-lg">
                 <i class="fas fa-home w-6 text-center"></i>
                 <span class="sidebar-text ml-3">首页</span>
             </a>
+            <!-- 创建任务入口 -->
             <a href="{% url 'create_task' %}"
                class="menu-item flex items-center p-3 text-gray-300 hover:bg-purple-700/20 rounded-lg">
                 <i class="fas fa-plus w-6 text-center"></i>
                 <span class="sidebar-text ml-3">创建任务</span>
             </a>
+            <!-- 管理任务入口 -->
             <a href="{% url 'manage_task' %}"
                class="menu-item flex items-center p-3 text-gray-300 hover:bg-purple-700/20 rounded-lg">
                 <i class="fas fa-cog w-6 text-center"></i>

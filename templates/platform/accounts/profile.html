@@ -1,4 +1,5 @@
 {% extends 'platform/components/base.html' %}
+<!-- 个人信息页：展示当前用户的资料、账户状态与类型 -->
 
 {% block title %}
     个人信息
@@ -11,6 +12,7 @@
 {% block content %}
 <div class="max-w-4xl mx-auto p-8">
     <div class="bg-white shadow-lg rounded-2xl p-6">
+        <!-- 用户头像与基本资料 -->
         <div class="flex items-center space-x-6">
             <div class="flex-shrink-0">
                 
@@ -42,6 +44,7 @@
             </div>
         </div>
 
+        <!-- 账户设置 / 安全管理入口 -->
         <div class="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
             <div class="bg-gray-100 rounded-xl p-6">
                 <h3 class="text-xl font-semibold text-gray-700 mb-4">

@@ -1,3 +1,4 @@
+<!-- 图像分类-已标注页：按状态筛选已标注样本，修改标签并确认校验 -->
 {% extends "platform/components/base_task_h.html" %} {% load static %} {% block task_table %}
 <style>
   #labeled-panel td.label-cell {
@@ -5,6 +6,7 @@
     white-space: normal !important;
   }
 </style>
+<!-- 已标注数据面板：状态筛选 + 样本表格 -->
 <div
   id="labeled-panel"
   class="bg-white rounded-xl shadow-md border border-gray-100 p-5 space-y-4"
@@ -40,6 +42,7 @@
   </div>
 </div>
 
+<!-- 图片放大预览弹窗 -->
 <div
   id="image-modal"
   class="hidden fixed inset-0 z-[200] bg-black/80 items-center justify-center p-2 md:p-4"

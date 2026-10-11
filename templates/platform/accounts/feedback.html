@@ -1,4 +1,5 @@
 {% extends 'platform/components/base.html' %}
+<!-- 意见反馈页：填写并提交意见或建议 -->
 
 {% block title %}
     更多
@@ -11,6 +12,7 @@
 {% block content %}
 <div class="max-w-3xl mx-auto p-6 bg-white rounded-2xl shadow">
     <h2 class="text-2xl font-semibold text-purple-700 mb-4">意见与反馈</h2>
+    <!-- 反馈提交表单 -->
     <form method="post" action="{% url 'submit_feedback' %}">
         {% csrf_token %}
         <label for="feedback" class="block text-lg text-gray-800 mb-2">请在下面输入您的意见或建议：</label>
