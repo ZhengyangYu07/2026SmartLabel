@@ -1,3 +1,8 @@
+"""
+上传标签文件的解析工具：把用户上传的标签文件转成 {文件名: 标签} 字典。
+
+用于半监督模式下读取初始标注，供后续与数据文件比对、抽取类别列表。
+"""
 import csv
 import json
 import os
@@ -21,6 +26,7 @@ def parse_label_file(file_obj) -> dict:
     lines = content.splitlines()
 
     if extension == '.csv':
+        # CSV：取前两列，去掉包裹的引号
         reader = csv.reader(lines)
         for row in reader:
             if len(row) >= 2:
@@ -29,12 +35,14 @@ def parse_label_file(file_obj) -> dict:
                 label_map[image_name] = label
 
     elif extension == '.txt':
+        # TXT：每行 "文件名,标签"，只按第一个逗号切分（标签中可能含逗号）
         for line in lines:
             if ',' in line:
                 image_name, label = line.split(',', 1)
                 label_map[image_name.strip()] = label.strip()
 
     elif extension == '.json':
+        # JSON：每行一个对象，字段为 filename / label
         for line in lines:
             try:
                 obj = json.loads(line)

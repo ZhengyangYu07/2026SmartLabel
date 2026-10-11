@@ -1,3 +1,18 @@
+"""
+核心任务流水线：Celery 异步执行标注任务。
+
+主入口 process_annotation_task 按 task_type 分三条支线：
+- image-classification：调用 img_classification 环境脚本做半监督图像分类；
+- text-classification ：调用 text_classification 环境脚本做文本分类；
+- object-detection    ：调用 efficientteacher 环境脚本做目标检测的冷启动/主动学习/微调。
+
+三条支线共用的机制：
+- 通过 conda 子进程调用各算法环境，run_subprocess_with_progress 实时解析输出推进进度；
+- 统一落库到 ImageResult/TextResult，并把检测结果写入闭环表（正样本索引/复核队列）；
+- 全程用 Redis 心跳标记算法存活，异常时把任务置为 failed 并记录 error_log。
+
+注意：本文件大量依赖宿主机上的 conda 环境名与模型权重，部署环境需保持一致。
+"""
 import csv
 import json
 import logging
@@ -32,19 +47,24 @@ from .services.detection_loop import (
     persist_review_queue_items,
 )
 
+# 进度写库的最小间隔（秒），避免子进程高频输出导致数据库被写爆
 MIN_UPDATE_INTERVAL = 0.5
 logger = logging.getLogger(__name__)
+# 目标检测训练/推理参数，均可用环境变量覆盖，便于不同机器调参而无需改代码
 DETECTION_TRAIN_EPOCHS = int(os.environ.get('SMARTLABEL_DETECTION_EPOCHS', '50'))
 DETECTION_TRAIN_BATCH_SIZE = int(os.environ.get('SMARTLABEL_DETECTION_BATCH_SIZE', '8'))
 DETECTION_FREEZE_LAYER_NUM = int(os.environ.get('SMARTLABEL_DETECTION_FREEZE_LAYER_NUM', '10'))
 DETECTION_MIN_TRAIN_IMAGES = int(os.environ.get('SMARTLABEL_DETECTION_MIN_TRAIN_IMAGES', '20'))
 DETECTION_PREDICT_CONF_THRES = float(os.environ.get('SMARTLABEL_DETECTION_CONF_THRES', '0.05'))
+# 推理时低于该置信度的框直接丢弃，不写入结果（避免噪声框）
 DETECTION_STORE_CONF_THRES = float(os.environ.get('SMARTLABEL_DETECTION_STORE_CONF_THRES', '0.25'))
 DETECTION_PREDICT_IOU_THRES = 0.45
 DETECTION_PREDICT_MAX_DET = 100
 DETECTION_MAX_BOXES_PER_IMAGE = 100
+# 微调结果“过弱”的判定阈值：低于此值则改用基础预训练模型兜底
 DETECTION_MIN_FINE_TUNED_BOXES = int(os.environ.get('SMARTLABEL_DETECTION_MIN_FINE_TUNED_BOXES', '50'))
 DETECTION_MIN_FINE_TUNED_IMAGE_RATIO = float(os.environ.get('SMARTLABEL_DETECTION_MIN_FINE_TUNED_IMAGE_RATIO', '0.05'))
+# 基础预训练权重候选路径，按顺序取第一个存在的
 DETECTION_PRETRAINED_WEIGHT_CANDIDATES = [
     Path(settings.BASE_DIR) / 'models' / 'efficient-yolov5l-obj365.pt',
     Path(settings.BASE_DIR) / 'models' / 'yolov5l.pt',
@@ -83,16 +103,19 @@ DEFAULT_TEXT_CLASSIFICATION_BERT_MODEL = Path(os.environ.get(
 
 
 def _resolve_text_classification_bert_model():
+    """优先用本地权重，本地缺失时回退到 HuggingFace 在线模型名。"""
     if DEFAULT_TEXT_CLASSIFICATION_BERT_MODEL.exists():
         return str(DEFAULT_TEXT_CLASSIFICATION_BERT_MODEL)
     return 'hfl/chinese-roberta-wwm-ext'
 
 
 def _heartbeat_cache_key(task_id):
+    """算法心跳在 Redis 中的 key。"""
     return f"task:{task_id}:algo_heartbeat"
 
 
 def _remove_detection_placeholder_label(labels):
+    """移除占位类别 'obj'：只要还存在真实类别，占位类别就不该进入训练。"""
     label_list = [str(label or '').strip() for label in labels if str(label or '').strip()]
     has_real_label = any(label != DETECTION_PLACEHOLDER_LABEL for label in label_list)
     if not has_real_label:
@@ -101,6 +124,7 @@ def _remove_detection_placeholder_label(labels):
 
 
 def _set_algorithm_heartbeat(task_id, line):
+    """记录算法子进程最新输出行与时间戳，供前端判断“是否卡死”。"""
     cache.set(
         _heartbeat_cache_key(task_id),
         {
@@ -112,11 +136,15 @@ def _set_algorithm_heartbeat(task_id, line):
 
 
 def clear_algorithm_heartbeat(task_id):
+    """任务结束时清除心跳。"""
     cache.delete(_heartbeat_cache_key(task_id))
 
 
 def _update_task_progress(task, progress, celery_task=None):
-    """阶段性更新任务进度，避免进度长时间无变化。"""
+    """阶段性更新任务进度，避免进度长时间无变化。
+
+    只允许进度单调递增，防止阶段回退导致前端进度条跳动。
+    """
     progress = int(max(0, min(progress, 100)))
     if task.progress >= progress:
         return
@@ -158,7 +186,10 @@ def check_system_resources(task_id=None):
         return None
 
 def create_progress_tracker(task, task_id, self=None):
-    """创建进度跟踪器函数"""
+    """创建进度跟踪器函数。
+
+    返回的闭包按“1% 变化或超过最小间隔”才写库，用于结果落库等内部循环中推进进度。
+    """
     # 进度跟踪器状态
     progress_data = {
         'current': 0,
@@ -167,6 +198,7 @@ def create_progress_tracker(task, task_id, self=None):
     }
 
     def update_progress(current, total):
+        """按“1% 变化或超过最小间隔”写库，避免内部循环高频更新。"""
         nonlocal task
         now = time.time()
         progress = float(current / total * 100) if total > 0 else 0
@@ -207,6 +239,7 @@ def run_subprocess_with_progress(cmd, task_id, total_files=None, progress_start=
         task_obj = Task.objects.get(id=task_id)
         _set_algorithm_heartbeat(task_id, 'subprocess_started')
         
+        # 子进程 stdout/stderr 合并为一路，统一按行解析；UTF-8 + replace 容错乱码
         process = subprocess.Popen(
             cmd, 
             stdout=subprocess.PIPE, 
@@ -218,10 +251,12 @@ def run_subprocess_with_progress(cmd, task_id, total_files=None, progress_start=
             env={**os.environ, 'PYTHONUNBUFFERED': '1'},
         )
         
+        # 子步骤进度映射到 [progress_start, progress_end] 区间，避免子步骤直接把整体推到 100%
         progress_start = int(max(0, min(progress_start, 99)))
         progress_end = int(max(progress_start, min(progress_end, 99)))
 
         def _stage_progress(raw_progress):
+            """把子进程自身的 0-100% 线性映射到本阶段的区间。"""
             raw_progress = max(0.0, min(float(raw_progress), 100.0))
             return int(progress_start + (raw_progress / 100.0) * (progress_end - progress_start))
 
@@ -239,6 +274,7 @@ def run_subprocess_with_progress(cmd, task_id, total_files=None, progress_start=
         last_synthetic_update_at = subprocess_started_at
         
         def _save_subprocess_progress(progress, reason, source_line=''):
+            """写进度（只增不减），并同步到 Celery 状态。"""
             nonlocal current_progress, task_obj
             progress = int(max(0, min(progress, 100)))
             if progress <= current_progress:
@@ -254,7 +290,9 @@ def run_subprocess_with_progress(cmd, task_id, total_files=None, progress_start=
                 logger.info("子进程运行中，阶段进度推进到 %s%%", progress)
             return True
 
+        # 单独线程读取 stdout，主线程用队列消费，避免管道阻塞
         def _read_subprocess_output():
+            """后台线程：持续把子进程输出塞进队列，避免管道写满阻塞子进程。"""
             for output_line in iter(process.stdout.readline, ''):
                 output_queue.put(output_line)
 
@@ -262,6 +300,7 @@ def run_subprocess_with_progress(cmd, task_id, total_files=None, progress_start=
         output_thread.start()
 
         def _handle_subprocess_line(line):
+            """解析单行输出：优先百分比，其次 epoch，最后文件计数。"""
             nonlocal processed_files
             line_processed_as_progress = False
             stripped_line = line.strip()
@@ -328,6 +367,7 @@ def run_subprocess_with_progress(cmd, task_id, total_files=None, progress_start=
                 pass
 
             now = time.time()
+            # 若子进程长时间不输出可解析的进度（如加载模型），按耗时缓慢推进，避免前端“假死”
             if progress_end > progress_start and now - last_synthetic_update_at >= 2:
                 elapsed = now - subprocess_started_at
                 synthetic_progress = min(
@@ -365,11 +405,15 @@ def run_subprocess_with_progress(cmd, task_id, total_files=None, progress_start=
 
 # 将结果保存到数据库
 def save_results_to_database(result_file_path, task, task_type, update_progress_func):
-    """保存结果到数据库，并在落库阶段动态推进任务进度。"""
+    """保存结果到数据库，并在落库阶段动态推进任务进度。
+
+    先清空该任务旧结果，再按 CSV 分批 bulk_create；落库进度映射到 85-99%。
+    """
     if not result_file_path.exists():
         logger.error(f"未找到结果文件: {result_file_path}")
         raise FileNotFoundError(f"未找到结果文件: {result_file_path}")
 
+    # 任务类型 → 结果模型，决定用哪张表承接结果
     model_key = {
         'image-classification': 'ImageResult',
         'text-classification': 'TextResult'
@@ -386,6 +430,7 @@ def save_results_to_database(result_file_path, task, task_type, update_progress_
         raise  # 如果删除失败，则终止操作
 
     def _safe_float(value, default=0.0):
+        """把 CSV 中的置信度字符串安全转 float，空值或异常一律回退 default。"""
         try:
             if value in (None, ''):
                 return default
@@ -452,7 +497,10 @@ def save_results_to_database(result_file_path, task, task_type, update_progress_
 
 
 def _merge_manual_labels_if_needed(task):
-    """如果存在人工标注文件，则与原始标注文件合并后返回新的 CSV 路径。"""
+    """如果存在人工标注文件，则与原始标注文件合并后返回新的 CSV 路径。
+
+    合并规则：以文件名为键，人工标注覆盖原始标注；两者都无则报错提示先保存人工标注。
+    """
     manual_label_path = Path(settings.MEDIA_ROOT) / 'results' / str(task.id) / 'manual_labels.csv'
     original_label_path = None
 
@@ -492,6 +540,7 @@ def _merge_manual_labels_if_needed(task):
 
 
 def _manual_text_label_path(task):
+    """文本任务人工补标清单的落盘路径。"""
     return Path(settings.MEDIA_ROOT) / 'results' / str(task.id) / 'manual_text_labels.csv'
 
 
@@ -501,7 +550,10 @@ def _manual_text_label_path(task):
     soft_time_limit=3600
 )
 def process_annotation_task(self, task_id):
-    """处理半监督模式的任务 (修复 'glob' 错误并增加健壮性)"""
+    """处理半监督模式的任务 (修复 'glob' 错误并增加健壮性)
+
+    这是所有标注任务的统一入口，按 task_type 分发到图像/文本/检测三条支线。
+    """
     logger.info(f"开始处理半监督任务: {task_id}")
     check_system_resources(task_id)
 
@@ -533,6 +585,7 @@ def process_annotation_task(self, task_id):
         _update_task_progress(task, 5, self)
         
         # ==================== 图像分类逻辑 ====================
+        # 数据来自解压目录；有标注则走半监督训练，无任何标注则走“冷启动”只输出不确定性
         if task.task_type == 'image-classification':
             # 1. 校验数据文件内容
             valid_image_extensions = {'.jpg', '.jpeg', '.png'}
@@ -560,6 +613,7 @@ def process_annotation_task(self, task_id):
             has_manual_label_file = manual_label_path.exists()
             if not has_uploaded_label_file and not has_manual_label_file:
                 def _cold_start_image_uncertainty(image_path):
+                    """无任何标注时的冷启动打分：用灰度图信息熵近似不确定性（越乱越值得标注）。"""
                     try:
                         with Image.open(image_path) as img:
                             gray = img.convert('L').resize((64, 64))
@@ -600,7 +654,7 @@ def process_annotation_task(self, task_id):
                 task.progress = 100
                 task.status = 'completed'
                 task.save()
-                logger.info(f"鍗婄洃鐫ｄ换鍔?{task_id} 澶勭悊瀹屾垚")
+                logger.info(f"半监督任务 {task_id} 处理完成")
                 return {"status": "success", "task_id": task_id}
 
             label_file_path = _merge_manual_labels_if_needed(task)
@@ -682,6 +736,7 @@ def process_annotation_task(self, task_id):
             save_results_to_database(result_file_path, task, 'image-classification', update_progress)
 
         # ==================== 文本分类逻辑 ====================
+        # 无标签：只按文本长度估计不确定性；有标签：合并人工标注后调用 CG3 文本分类算法
         elif task.task_type == 'text-classification':
             unlabeled_files = list(extract_dir.glob('*.csv'))
             if not unlabeled_files:
@@ -855,6 +910,7 @@ def process_annotation_task(self, task_id):
                 save_results_to_database(result_file_path, task, 'text-classification', update_progress)
 
         # ==================== 目标检测逻辑 ====================
+        # 最复杂的分支：解析多种来源标注 → 生成 YOLO 标签 → 训练/推理 → 写入闭环表
         elif task.task_type == 'object-detection':
             # 验证数据目录
             valid_image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'}
@@ -873,12 +929,14 @@ def process_annotation_task(self, task_id):
             image_by_name = {p.name: p for p in image_files}
 
             def _canonical_detection_label(label):
+                """把中文别名等归一化为统一英文类别名，保证类别一致。"""
                 label_text = str(label or '').strip()
                 if not label_text:
                     return DETECTION_PLACEHOLDER_LABEL
                 return DETECTION_LABEL_ALIASES.get(label_text, label_text)
 
             def _default_detection_label():
+                """只有一个真实类别时用它作默认类别，否则回退占位类别 'obj'。"""
                 task_labels = _remove_detection_placeholder_label(
                     [_canonical_detection_label(label) for label in (task.label_list or [])]
                     + list(declared_class_names)
@@ -888,6 +946,10 @@ def process_annotation_task(self, task_id):
                 return DETECTION_PLACEHOLDER_LABEL
 
             def _normalize_detection_xyxy(xmin, ymin, xmax, ymax, image_width, image_height):
+                """把任意坐标系下的 xyxy 归一化为 0-1 的中心点+宽高；非法框返回 None。
+
+                若四值本就落在 [0,1] 视为已归一化，否则按图像尺寸做归一化。
+                """
                 if xmax <= xmin or ymax <= ymin or image_width <= 0 or image_height <= 0:
                     return None
 
@@ -913,6 +975,7 @@ def process_annotation_task(self, task_id):
                 }
 
             def _bounds_to_detection_boxes(raw_bounds, image_width, image_height):
+                """把 "x1 y1 x2 y2 x1 y1 x2 y2 ..." 形式的框串解析成归一化框列表。"""
                 if raw_bounds in (None, ''):
                     return []
                 parts = str(raw_bounds).replace(',', ' ').split()
@@ -936,6 +999,7 @@ def process_annotation_task(self, task_id):
                 return boxes
 
             def _detection_box_xyxy(box):
+                """把归一化框（中心点+宽高）换算为裁剪到 [0,1] 的 xyxy 角点。"""
                 x = float(box.get('x', 0))
                 y = float(box.get('y', 0))
                 w = float(box.get('w', 0))
@@ -948,6 +1012,7 @@ def process_annotation_task(self, task_id):
                 )
 
             def _detection_box_iou(left, right):
+                """计算两个归一化框的交并比（IoU），用于去重。"""
                 lx1, ly1, lx2, ly2 = _detection_box_xyxy(left)
                 rx1, ry1, rx2, ry2 = _detection_box_xyxy(right)
                 inter_w = max(0.0, min(lx2, rx2) - max(lx1, rx1))
@@ -959,6 +1024,7 @@ def process_annotation_task(self, task_id):
                 return inter_area / union_area if union_area > 0 else 0.0
 
             def _dedupe_detection_boxes(boxes, iou_threshold=0.9):
+                """同类别内去掉 IoU≥阈值 的重复框（保留先出现的）。"""
                 deduped = []
                 for box in boxes or []:
                     label = str(box.get('label') or '').strip()
@@ -972,6 +1038,7 @@ def process_annotation_task(self, task_id):
                 return deduped
 
             def _append_coco_annotations(coco_data):
+                """把 COCO 格式标注转成归一化框，追加到 labeled_map（按文件名索引）。"""
                 categories = {
                     int(c.get('id')): _canonical_detection_label(c.get('name') or 'obj')
                     for c in coco_data.get('categories', [])
@@ -1027,6 +1094,7 @@ def process_annotation_task(self, task_id):
                     })
 
             def _append_csv_annotations(csv_file_path):
+                """把 CSV 标注（class/filename/bounds 等列）转成归一化框追加到 labeled_map。"""
                 loaded_csv_boxes = 0
                 with open(csv_file_path, 'r', encoding='utf-8', newline='') as cf:
                     reader = csv.DictReader(cf)
@@ -1314,6 +1382,7 @@ def process_annotation_task(self, task_id):
             image_sequence_by_name = {p.name: index for index, p in enumerate(image_files, start=1)}
 
             def _accepted_manual_detection_annotations(boxes):
+                """把外部标注框包装成“人工已确认”的标注结构（source=manual/decision=accepted）。"""
                 annotations = []
                 for box in boxes:
                     annotations.append({
@@ -1330,6 +1399,7 @@ def process_annotation_task(self, task_id):
                 return annotations
 
             def _sync_external_detection_labels():
+                """把外部标注同步为“人工已确认”样本（confidence=-1），并清掉同图模型预测。"""
                 ResultModel = apps.get_model('data_management', 'ImageResult')
                 synced_count = 0
                 for image_name, boxes in labeled_map.items():
@@ -1399,6 +1469,7 @@ def process_annotation_task(self, task_id):
             total_images = max(len(image_files), 1)
 
             def _update_detection_stage_progress(current, total, start, end):
+                """把 [0,total] 的当前进度线性映射到 [start,end] 并写库。"""
                 if total <= 0:
                     _update_task_progress(task, end, self)
                     return
@@ -1406,12 +1477,14 @@ def process_annotation_task(self, task_id):
                 _update_task_progress(task, progress, self)
 
             def _should_update_detection_progress(index, total):
+                """按约 1/40 的粒度写进度，避免逐条循环频繁写库。"""
                 if total <= 0:
                     return False
                 batch_size = max(1, math.ceil(total / 40))
                 return index == total or index % batch_size == 0
 
             def _label_path_for_image(img_path):
+                """由图片路径推导对应的 YOLO label 文件路径（images/ → labels/）。"""
                 parts = list(img_path.parts)
                 if 'images' in parts:
                     idx = parts.index('images')
@@ -1470,6 +1543,7 @@ def process_annotation_task(self, task_id):
             detect_source = extract_dir / 'images' if (extract_dir / 'images').exists() else extract_dir
 
             def _detection_review_result(annotations, image_path, pre_filter_count=0, post_filter_count=0):
+                """调用主动学习评分，返回 (复核价值分, 低置信框数, 明细)。"""
                 return detection_review_value_detail(
                     annotations,
                     image_path,
@@ -1479,6 +1553,7 @@ def process_annotation_task(self, task_id):
                 )
 
             def _detection_review_value(annotations, image_path, pre_filter_count=0, post_filter_count=0):
+                """只取 (复核价值分, 低置信框数) 两个值的简化版评分。"""
                 score, low_confidence_count, _detail = _detection_review_result(
                     annotations,
                     image_path,
@@ -1488,6 +1563,7 @@ def process_annotation_task(self, task_id):
                 return score, low_confidence_count
 
             def _build_empty_detection_rows(progress_start=80, progress_end=88):
+                """为每张图生成“无预测框”的占位结果行（仍带复核价值分）。"""
                 rows = []
                 for seq, img_path in enumerate(image_files, start=1):
                     review_score, low_confidence_count, review_detail = _detection_review_result([], img_path)
@@ -1508,6 +1584,7 @@ def process_annotation_task(self, task_id):
                 return rows
 
             def _coco_id_to_label_map():
+                """把本任务的类别映射为 COCO 官方类号 → 类别名，供基础模型推理时 --classes 过滤。"""
                 coco_id_to_label = {}
                 for label in class_list:
                     normalized_label = DETECTION_LABEL_ALIASES.get(str(label).strip(), str(label).strip())
@@ -1517,6 +1594,10 @@ def process_annotation_task(self, task_id):
                 return coco_id_to_label
 
             def _collect_detection_rows_from_labels(pred_labels_dir, id_to_label, sample_mode, progress_start=80, progress_end=88):
+                """读取模型输出的 YOLO label 文件，按置信度阈值过滤并生成结果行。
+
+                返回 (rows, 原始框总数, 被过滤框数)，同时为每张图计算复核价值分。
+                """
                 rows = []
                 raw_count = 0
                 filtered_count = 0
@@ -1585,6 +1666,10 @@ def process_annotation_task(self, task_id):
                 return rows, raw_count, filtered_count
 
             def _run_pretrained_detection_rows(reason, subprocess_start=20, subprocess_end=80, collect_start=80, collect_end=88):
+                """用基础预训练权重（COCO/Obj365）做冷启动推理，产出初始候选框。
+
+                仅在正样本不足（冷启动/few-shot）或微调结果过弱时使用。
+                """
                 if not DETECTION_PRETRAINED_WEIGHT.exists():
                     logger.warning("目标检测基础预训练权重不存在，无法执行 %s: %s", reason, DETECTION_PRETRAINED_WEIGHT)
                     return _build_empty_detection_rows(collect_start, collect_end), 0, 0
@@ -1638,6 +1723,7 @@ def process_annotation_task(self, task_id):
                 )
 
             def _persist_detection_rows(rows, mode):
+                """把检测结果行写入 result.csv，并落库到 ImageResult（保留人工已确认样本）。"""
                 result_dir.mkdir(parents=True, exist_ok=True)
                 with open(result_file_path, 'w', newline='', encoding='utf-8') as f:
                     writer = csv.DictWriter(
@@ -1710,6 +1796,7 @@ def process_annotation_task(self, task_id):
                     sum(1 for row in rows if row['annotations']),
                 )
 
+            # 分支1：正样本不足 → 不训练，直接用基础预训练模型冷启动出候选框
             if len(positive_labeled_images) < DETECTION_MIN_TRAIN_IMAGES:
                 active_mode = 'cold_start' if not positive_labeled_images else 'few_shot_active_learning'
                 rows, raw_count, filtered_count = _run_pretrained_detection_rows(
@@ -1730,6 +1817,7 @@ def process_annotation_task(self, task_id):
                     "mode": active_mode,
                 }
 
+            # 分支2：完全没有可用标注 → 生成全空框冷启动样本，等人工标注后重跑
             if not labeled_images:
                 result_rows = []
                 for seq, img_path in enumerate(image_files, start=1):
@@ -1805,6 +1893,7 @@ def process_annotation_task(self, task_id):
                 return {"status": "success", "task_id": task_id, "mode": "cold_start"}
 
             # 简单划分 val（10% 的有标签样本）
+            # 只有 1 张时 train/val 都用它，避免 val 为空导致上游报错
             if len(labeled_images) == 1:
                 train_images = labeled_images
                 val_images = labeled_images
@@ -1827,6 +1916,7 @@ def process_annotation_task(self, task_id):
             target_txt = data_list_dir / 'target.txt'
 
             def write_list(path, lst, with_label=False):
+                """写出数据集清单 txt；with_label 时每行追加对应 label 文件路径（YOLO 训练用）。"""
                 with open(path, 'w', encoding='utf-8') as f:
                     for p in lst:
                         if with_label:
@@ -2089,6 +2179,7 @@ def process_annotation_task(self, task_id):
                 predicted_box_count < DETECTION_MIN_FINE_TUNED_BOXES
                 or predicted_image_count < min_fine_tuned_images
             )
+            # 分支3：微调结果过弱（框太少/覆盖图片太少）→ 用基础预训练权重兜底重跑一次推理
             if fine_tuned_result_is_weak and DETECTION_PRETRAINED_WEIGHT.exists() and DETECTION_PRETRAINED_WEIGHT.name.lower().startswith('yolov5'):
                 coco_id_to_label = {}
                 for label in class_list:
@@ -2296,6 +2387,7 @@ def process_annotation_task(self, task_id):
         return {"status": "success", "task_id": task_id}
         
     except (FileNotFoundError, ValueError) as e:
+         # 可预期的数据/环境问题：标记失败并记录原因，不做重试
          logger.error(f"处理半监督任务 {task_id} 时发生数据校验错误: {str(e)}")
          task.status = 'failed'
          task.error_log = f"数据校验失败: {e}"
@@ -2303,6 +2395,7 @@ def process_annotation_task(self, task_id):
          return {"status": "failed", "reason": str(e)}
 
     except Exception as e:
+        # 未知异常同样标记失败；用 Ignore 阻止 Celery 自动重试，避免反复占用 Worker
         logger.error(f"处理半监督任务 {task_id} 时发生未知错误: {e}", exc_info=True)
         task.status = 'failed'
         task.error_log = f"内部服务器错误: {e}"

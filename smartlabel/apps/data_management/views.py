@@ -1,3 +1,16 @@
+"""
+data_management 视图层：任务创建/监控、结果查询与人工标注的全部 HTTP 接口。
+
+大致分三类：
+1. 任务生命周期：validate_data_file（上传预检）、submit_task（创建并投递 Celery）、
+   task_operation/task_progress/task_detail（监控与详情）、clear_draft；
+2. 人工标注：manual_annotation、save_manual_annotation、save_detection_annotations、
+   rerun_semi_supervised（回写闭环表后重跑）；
+3. 结果数据：task_data（分页列表）、handle_label_update/update_task_items/verify_item、
+   export_data/export_detection_labelme（导出）、收藏相关接口。
+
+注意：本层只做参数校验与编排，重活（训练/推理）都在 tasks.py 的 Celery 任务里。
+"""
 import codecs
 import csv
 import hashlib
@@ -44,6 +57,7 @@ DETECTION_PLACEHOLDER_LABEL = 'obj'
 
 
 def _remove_detection_placeholder_label(labels):
+    """移除占位类别 'obj'（存在真实类别时才移除），与 tasks.py 逻辑一致。"""
     label_list = [str(label or '').strip() for label in labels if str(label or '').strip()]
     has_real_label = any(label != DETECTION_PLACEHOLDER_LABEL for label in label_list)
     if not has_real_label:
@@ -52,6 +66,7 @@ def _remove_detection_placeholder_label(labels):
 
 
 def _sync_detection_task_labels(task, labels):
+    """把新出现的检测类别合并回任务的 label_list（仅目标检测任务）。"""
     if task.task_type != 'object-detection':
         return
 
@@ -68,6 +83,7 @@ def _sync_detection_task_labels(task, labels):
 
 
 def _filter_detection_annotations_for_display(item, annotations):
+    """人工确认样本（confidence=-1）只展示已确认的框，过滤掉模型待定/被驳回的框。"""
     if not isinstance(annotations, list):
         return []
 
@@ -107,12 +123,14 @@ def _filter_detection_annotations_for_display(item, annotations):
 
 
 def _stable_task_total_count(task, fallback_count):
+    """目标检测任务的“总数”用上传时固定的 uploaded_total，避免标注后数字变化。"""
     if task.task_type == 'object-detection' and getattr(task, 'uploaded_total', 0):
         return task.uploaded_total
     return fallback_count
 
 
 def _get_task_runners():
+    """延迟导入 Celery 任务，避免模块级循环依赖。"""
     from .tasks import process_annotation_task
     return process_annotation_task
 
@@ -175,6 +193,7 @@ def _remove_task_message_from_broker(celery_task_id):
 
 
 def _safe_remove_file(path, label):
+    """删除文件（不存在或失败都不抛异常），返回是否删除成功。"""
     if not path:
         return False
     try:
@@ -188,6 +207,7 @@ def _safe_remove_file(path, label):
 
 
 def _safe_remove_dir(path, label):
+    """删除目录（忽略错误），返回是否已删除；目录被占用时返回 False 并告警。"""
     try:
         if path and path.exists():
             shutil.rmtree(path, ignore_errors=True)
@@ -268,12 +288,14 @@ def _get_label_verification_stats(task, result_model, relation_field):
 
 
 def _add_detection_label(label_set, label):
+    """把非空类别名加入集合。"""
     value = str(label or '').strip()
     if value:
         label_set.add(value)
 
 
 def _collect_detection_labels_from_json(label_set, json_data):
+    """从 labelme 风格 JSON 的 categories/shapes 中收集类别名。"""
     if not isinstance(json_data, dict):
         return
     for category in json_data.get('categories', []) or []:
@@ -285,6 +307,7 @@ def _collect_detection_labels_from_json(label_set, json_data):
 
 
 def _collect_detection_labels_from_file(label_set, label_path):
+    """按扩展名分派：JSON/CSV/TXT 三种标注文件里提取类别名。"""
     suffix = label_path.suffix.lower()
     if suffix == '.json':
         with open(label_path, 'r', encoding='utf-8') as f:
@@ -573,6 +596,7 @@ def get_homepage_stats(request):
 # 获取草稿/暂存数据
 @require_http_methods(["GET"])
 def get_draft(request):
+    """返回会话中缓存的提交表单草稿。"""
     draft = request.session.get('task_draft', {})
     return JsonResponse(draft)
 
@@ -581,6 +605,7 @@ def get_draft(request):
 @csrf_exempt
 @require_http_methods(["POST"])
 def save_draft(request):
+    """把表单基本信息暂存到会话，供刷新页面后回填。"""
     try:
         request.session['task_draft'] = {
             'name': request.POST.get('task_name'),
@@ -598,6 +623,10 @@ def save_draft(request):
 @login_required
 @require_http_methods(["POST"])
 def submit_task(request):
+    """创建标注任务：幂等防重 → 落库 → 解压数据 → 投递 Celery 异步处理。
+
+    返回 task_id 与监控地址；重复提交会复用已创建的任务。
+    """
     submission_lock_key = None
     lock_acquired = False
 
@@ -829,6 +858,7 @@ def submit_task(request):
 @csrf_exempt
 @require_http_methods(["POST"])
 def clear_draft(request):
+    """清空会话中的表单草稿。"""
     try:
         if 'task_draft' in request.session:
             del request.session['task_draft']
@@ -890,6 +920,7 @@ def get_task_meta_data(request, task_id):
 # 获取任务列表
 @login_required
 def get_tasks(request):
+    """分页查询当前用户的任务列表，支持按状态/类型/名称筛选，收藏置顶。"""
     if request.method == 'GET':
         # 获取筛选参数
         status_list = request.GET.getlist('status', [])
@@ -963,10 +994,12 @@ def get_tasks(request):
 
 
 def _manual_label_manifest_path(task_id):
+    """图像任务人工补标清单的落盘路径。"""
     return Path(settings.MEDIA_ROOT) / 'results' / str(task_id) / 'manual_labels.csv'
 
 
 def _manual_text_label_manifest_path(task_id):
+    """文本任务人工补标清单的落盘路径。"""
     return Path(settings.MEDIA_ROOT) / 'results' / str(task_id) / 'manual_text_labels.csv'
 
 
@@ -1003,6 +1036,7 @@ def _merge_manual_labels_for_task(task):
 
 
 def _upsert_manual_label_record(task, image_name, label):
+    """按文件名写入/更新图像人工补标清单（同图覆盖）。"""
     manifest_path = _manual_label_manifest_path(task.id)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1028,6 +1062,7 @@ def _upsert_manual_label_record(task, image_name, label):
 
 
 def _upsert_manual_text_label_record(task, content, label):
+    """按文本内容写入/更新文本人工补标清单（同文本覆盖）。"""
     manifest_path = _manual_text_label_manifest_path(task.id)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1143,6 +1178,7 @@ def _load_text_uncertainty_scores(task):
 # 对任务进行获取或删除操作
 @login_required
 def task_operation(request, task_id):
+    """任务详情/删除：GET 返回状态摘要，DELETE 撤销 Celery 任务并清理文件。"""
     task = get_object_or_404(Task, id=task_id, user=request.user)
 
     if request.method == 'GET':
@@ -1530,9 +1566,11 @@ def save_detection_annotations(request, task_id):
         normalized_annotations = []
 
         def _clamp01(value):
+            """把坐标裁剪到 [0,1]。"""
             return max(0.0, min(1.0, float(value)))
 
         def _clean_points(points):
+            """规范化多边形/线条的点列表，坐标统一裁剪到 [0,1]。"""
             cleaned = []
             for point in points or []:
                 if isinstance(point, dict):
@@ -2148,6 +2186,7 @@ def task_data(request, task_id):
             queryset_list = list(queryset)
 
             def _uncertainty_sort_key(item):
+                """排序键：优先用算法给的不确定性分，缺失则用 1-confidence 兜底。"""
                 score_key = (
                     getattr(item, 'text_id', '')
                     if task.task_type == 'text-classification'
@@ -2197,6 +2236,7 @@ def task_data(request, task_id):
             queryset_list = list(queryset)
 
             def _detection_review_sort_key(item):
+                """检测任务的排序键：按复核价值分降序（人工已确认样本置 0）。"""
                 score = uncertainty_scores.get(getattr(item, 'image_name', ''), None)
                 if score is None:
                     try:
@@ -2294,6 +2334,7 @@ def task_data(request, task_id):
 @login_required
 @require_http_methods(["GET"])
 def get_task_stats(request, task_id):
+    """返回任务统计：已校验/未校验/未标注数量与校验进度，供前端概览展示。"""
     task = get_object_or_404(Task, id=task_id)
     TaskService.validate_ownership(task, request.user)
 

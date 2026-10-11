@@ -1,18 +1,12 @@
 """
-URL configuration for smartlabel project.
+项目根路由。
 
-The `urlpatterns` list routes URLs to views. For more information please see:
-    https://docs.djangoproject.com/en/4.2/topics/http/urls/
-Examples:
-Function views
-    1. Add an import:  from my_app import views
-    2. Add a URL to urlpatterns:  path('', views.home, name='home')
-Class-based views
-    1. Add an import:  from other_app.views import Home
-    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
-Including another URLconf
-    1. Import the include() function: from django.urls import include, path
-    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
+分发关系：
+- admin/            Django 后台
+- '' → users.urls   登录/注册/首页/用户手册等
+- '' → data_management.urls  任务创建、进度、详情、导出等接口
+
+末尾 static() 用于开发环境直接提供 /media/ 访问，DEBUG=False 时自动失效（返回空列表）。
 """
 from django.conf import settings
 from django.conf.urls.static import static

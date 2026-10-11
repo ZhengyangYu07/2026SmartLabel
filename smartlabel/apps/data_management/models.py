@@ -1,3 +1,15 @@
+"""
+data_management 数据模型。
+
+核心是任务与结果数据，以及支撑“半监督标注闭环”的三张辅助表：
+- Task            任务主表（配置、状态、进度）
+- ImageResult     图像/目标检测的单条结果
+- TextResult      文本分类的单条结果
+- PositiveIndex   人工确认的正样本索引（闭环依据）
+- MissFixTable    漏检补框事件表（记录“本该检出却没检出”的修正）
+- ReviewQueueCache 复核候选队列缓存（按评分挑出最值得人工复核的样本）
+- FavoriteTask    用户收藏任务
+"""
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.db import models
@@ -6,6 +18,8 @@ from django.db.models import JSONField
 import uuid
 
 class Task(models.Model):
+    """任务主表：一次标注任务的配置与运行状态，是所有结果的归属根。"""
+
     STATUS_CHOICES = (
         ('pending', '等待中'),
         ('processing', '进行中'),
@@ -47,6 +61,7 @@ class Task(models.Model):
     model_strength = models.CharField(max_length=50, blank=True, null=True, verbose_name="模型强度")
 
     # 创建与传递信息
+    # celery_task_id：便于前端按 id 查询/撤销异步任务；与任务状态共同反映后台执行情况
     celery_task_id = models.CharField(max_length=50, blank=True, null=True, verbose_name="celery任务ID")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
@@ -70,6 +85,8 @@ class Task(models.Model):
 
 
 class ImageResult(models.Model):
+    """图像分类 / 目标检测的单条样本结果；annotations 字段仅目标检测使用。"""
+
     # 定义 ImageResult 自己的状态 Choices
     ITEM_STATUS_CHOICES = (
         ('verified', '已校验'),
@@ -90,9 +107,9 @@ class ImageResult(models.Model):
     status = models.CharField(max_length=20, choices=ITEM_STATUS_CHOICES, default="unverified")
 
     def save(self, *args, **kwargs):
-        # 如果是新创建的实例，且 sequence_number 尚未设置（默认值为1）
+        # 首次保存时自动分配任务内序号：取同任务当前最大序号 +1，保证展示顺序稳定。
+        # 默认值 1 被用作“未分配”的哨兵值，因此手动指定过序号（!=1）的记录不会被覆盖。
         if not self.pk and self.sequence_number == 1:
-            # 获取当前任务下最大的 sequence_number
             max_seq = ImageResult.objects.filter(task=self.task).aggregate(models.Max('sequence_number'))['sequence_number__max']
             if max_seq is not None:
                 self.sequence_number = max_seq + 1
@@ -114,6 +131,7 @@ class ImageResult(models.Model):
 
     @property
     def relative_image_url(self):
+        """把数据库中存储的绝对路径转换为可访问的 /media/ URL。"""
         if not self.image_path:
             return ''  # 如果数据库里是空的，避免报错
         path = self.image_path.replace("\\", "/")  # 统一用斜杠
@@ -131,6 +149,12 @@ class ImageResult(models.Model):
 
 
 class PositiveIndex(models.Model):
+    """人工确认的正样本索引：记录“已被人工确认正确”的样本及其图像特征。
+
+    它是半监督闭环的依据——后续挑复核样本时，用这里的正样本做相似度/类别均衡参考。
+    index_version 随每次写入递增，便于队列缓存判断是否需要重算。
+    """
+
     SOURCE_CHOICES = (
         ('manual_positive', '人工确认正样本'),
         ('miss_fix', '漏检补框样本'),
@@ -161,6 +185,12 @@ class PositiveIndex(models.Model):
 
 
 class MissFixTable(models.Model):
+    """漏检补框事件表：记录“模型原本无框、人工补了框”的样本。
+
+    这类样本价值最高（模型漏检），既写入 PositiveIndex 供后续相似度比对，
+    也保留原始事件用于追溯与统计。index_write_status 跟踪索引写入是否成功。
+    """
+
     INDEX_STATUS_CHOICES = (
         ('pending', '待写入'),
         ('written', '已写入'),
@@ -192,6 +222,12 @@ class MissFixTable(models.Model):
 
 
 class ReviewQueueCache(models.Model):
+    """复核候选队列缓存：把“最值得人工复核”的样本及其评分落库。
+
+    分两条候选分支（有框/最终无框），记录各维度分数与综合 review_score；
+    cache_status 用于索引更新后标记缓存是否需要重算。
+    """
+
     BRANCH_CHOICES = (
         ('boxed', '有框候选图像'),
         ('final_empty', '最终无框候选图像'),
@@ -236,6 +272,8 @@ class ReviewQueueCache(models.Model):
 
 
 class TextResult(models.Model):
+    """文本分类的单条样本结果。"""
+
     # 定义 TextResult 自己的状态 Choices
     ITEM_STATUS_CHOICES = (
         ('verified', '已校验'),
@@ -254,7 +292,7 @@ class TextResult(models.Model):
     status = models.CharField(max_length=20, choices=ITEM_STATUS_CHOICES, default="unverified")
 
     def save(self, *args, **kwargs):
-        # 如果是新创建的实例，且 sequence_number 尚未设置（默认值为1）
+        # 与 ImageResult 相同：首次保存自动分配任务内序号。
         if not self.pk and self.sequence_number == 1:
             # 获取当前任务下最大的 sequence_number
             max_seq = TextResult.objects.filter(task=self.task).aggregate(models.Max('sequence_number'))['sequence_number__max']
@@ -278,6 +316,8 @@ class TextResult(models.Model):
 
 
 class FavoriteTask(models.Model):
+    """用户收藏的任务（多对多关系的显式中间表）。"""
+
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='favorite_tasks')
     task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='favorited_by')
     created_at = models.DateTimeField(auto_now_add=True)

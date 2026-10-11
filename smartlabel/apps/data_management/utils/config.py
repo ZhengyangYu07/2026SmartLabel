@@ -1,3 +1,9 @@
+"""
+任务详情/导出相关的公共配置与工具。
+
+TASK_CONFIG 用“任务类型 → 结果模型、详情模板、CSV 字段”的方式，把三类任务
+（图像分类、文本分类、目标检测）的差异集中到一处，视图层据此通用化处理。
+"""
 import codecs
 import csv
 import json
@@ -12,7 +18,7 @@ from django.core.exceptions import PermissionDenied
 
 from ..models import Task, ImageResult, TextResult
 
-# 任务显示内容配置
+# 任务显示内容配置：新增任务类型时在此登记即可，详情页与导出逻辑无需改动
 TASK_CONFIG = {
     'image-classification': {
         'result_model': ImageResult,
@@ -68,6 +74,8 @@ def display_task_progress(status, progress):
 
 
 class TaskService:
+    """任务详情页的公共逻辑：拼装上下文、校验归属。"""
+
     def __init__(self):
         pass
 
@@ -79,6 +87,7 @@ class TaskService:
         relation_field = config['relation_field']
         total_count = result_model.objects.filter(**{relation_field: task}).count()
         task.total_count = total_count
+        # 进度经 display_task_progress 处理，未完成时不会显示 100%
         task.progress = display_task_progress(task.status, task.progress)
         return {
             'task': task,
