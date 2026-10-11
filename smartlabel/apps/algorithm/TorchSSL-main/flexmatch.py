@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】TorchSSL 的 FlexMatch 训练主脚本（含单机与分布式训练入口）。
+"""
 # import needed library
 import os
 import logging

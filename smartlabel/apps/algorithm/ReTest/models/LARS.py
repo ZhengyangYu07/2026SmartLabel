@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】ReTest 的 LARS 层自适应学习率优化器实现。
+"""
 import torch
 from torch.optim.optimizer import Optimizer
 from typing import Tuple, Dict, Any, Optional

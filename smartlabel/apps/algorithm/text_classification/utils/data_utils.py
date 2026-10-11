@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】文本分类算法的数据工具，加载 CSV/JSON/TXT 文本数据并编码标签。
+"""
+
 import pandas as pd
 import torch
 import os

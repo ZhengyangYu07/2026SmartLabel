@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】文本分类算法中的损失函数集合，包含半监督对比损失与图结构生成损失。
+"""
+
 import torch
 import torch.nn.functional as F
 

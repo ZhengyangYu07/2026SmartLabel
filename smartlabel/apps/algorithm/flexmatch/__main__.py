@@ -1,4 +1,7 @@
-"""Allow running the flexmatch package directly with python -m."""
+"""
+【暂未实际使用】flexmatch 包的命令行入口，通过 python -m 读取配置文件并调用训练流程。
+Allow running the flexmatch package directly with python -m.
+"""
 
 from __future__ import annotations
 

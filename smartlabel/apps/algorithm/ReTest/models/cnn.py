@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】ReTest 的 CNN 图像分类骨干网络定义。
+"""
 import torch
 import torch.nn as nn
 import sys

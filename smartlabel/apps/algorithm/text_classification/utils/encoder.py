@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】文本分类算法的 BERT 文本编码器，将文本编码为归一化句向量。
+"""
+
 import os
 from pathlib import Path
 import torch

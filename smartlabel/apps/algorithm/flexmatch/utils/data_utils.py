@@ -1,9 +1,15 @@
+"""数据集加载与标签编码工具。
+
+把 csv/json/txt 原始数据读成 DataFrame、拆分有/无标签样本，并把字符串标签映射为整数 id，
+是 train.py 半监督文本分类流程的数据输入层。
+"""
 import pandas as pd
 import torch
 import os
 
 
 def load_dataset(path, file_format="csv", split=True):
+    """从单个文件读取数据；split=True 时按标签是否为空拆成有标签/无标签两份。"""
     if file_format == "csv":
         df = pd.read_csv(path)
 
@@ -31,9 +37,11 @@ def load_dataset(path, file_format="csv", split=True):
         raise ValueError("Unsupported file format")
 
     df["text"] = df["text"].astype(str)
+    # 统一标签为字符串，空串和 "nan" 都视为无标签
     df["label"] = df["label"].astype(str).str.strip().replace("nan", "")
 
     if split:
+        # 标签非空为有标签样本，空为待预测的无标签样本
         labeled_df = df[df["label"] != ""].reset_index(drop=True)
         unlabeled_df = df[df["label"] == ""].reset_index(drop=True)
         return labeled_df, unlabeled_df
@@ -42,22 +50,27 @@ def load_dataset(path, file_format="csv", split=True):
 
 
 def encode_labels(labels, full_label_list=None):
+    """把字符串标签映射为整数 id，未在词表中的标签编码为 -1（表示无标签）。"""
     if full_label_list is None:
         label_set = sorted(set(l for l in labels if l != ""))
     else:
+        # 用全量标签词表，保证有/无标签样本共享同一套 id 空间
         label_set = sorted(set(l for l in full_label_list if l != ""))
 
     label2id = {l: i for i, l in enumerate(label_set)}
     id2label = {i: l for l, i in label2id.items()}
+    # -1 作为无标签占位符，后续用 get_mask 区分
     encoded = torch.LongTensor([label2id[l] if l in label2id else -1 for l in labels])
     return encoded, label2id, id2label
 
 
 def get_mask(encoded_labels):
+    """生成布尔掩码，True 表示该样本有真实标签（可参与监督损失）。"""
     return encoded_labels != -1
 
 
 def load_dataset_from_dir(folder_path, file_format="csv", split=True):
+    """读取目录下所有同格式文件并合并，再按标签是否为空拆分。"""
     all_dfs = []
 
     for fname in os.listdir(folder_path):

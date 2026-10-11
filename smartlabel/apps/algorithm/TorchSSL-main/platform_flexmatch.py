@@ -1,4 +1,5 @@
 """
+【暂未实际使用】平台侧 FlexMatch 文本数据入口，从数组数据启动 FlexMatch 训练。
 Platform entry for running FlexMatch on uploaded text data.
 
 Provides a helper `train_from_text_arrays` which accepts numpy/torch Arrays or lists

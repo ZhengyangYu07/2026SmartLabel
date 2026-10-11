@@ -1,5 +1,14 @@
 
 
+"""
+图像分类算法入口（由 Django 侧以 conda 环境 img_classification 调用）。
+
+流程：CLIP 提取图像特征 → 构建 KNN 图与扩散图 → 三路半监督分类器
+（CG3、LLGC、流形正则）→ 多数投票融合 → 写出 result.csv。
+
+约定：已标注样本的置信度/不确定性字段统一写 -1，只有未标注样本才计算真实值，
+平台“结果复核”页据此排序，挑出最值得人工复核的样本。
+"""
 import os
 import json
 import math
@@ -18,11 +27,16 @@ from model.ManifoldClassifier import ManifoldClassifier, ManifoldClassifierWithD
 
 
 def emit_progress(progress):
+    """打印进度百分比，供 Django 侧解析子进程输出以推进任务进度条（封顶 99）。"""
     progress = max(0, min(int(progress), 99))
     print(f"处理进度: {progress}%")
 
 
 def train(config):
+    """执行完整的半监督图像分类流程，并把逐图预测与不确定性指标写入 result.csv。
+
+    config 由 Django 侧生成，包含数据路径、各分类器超参与输出目录等。
+    """
     device = config.get("device", "cuda" if torch.cuda.is_available() else "cpu")
     print(f"[Info] Using device: {device}")
     emit_progress(22)

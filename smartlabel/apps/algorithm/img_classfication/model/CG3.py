@@ -1,4 +1,7 @@
 
+"""
+【暂未实际使用】图像分类模块的 CG3 图卷积半监督分类模型实现（含 GCN 层）。
+"""
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

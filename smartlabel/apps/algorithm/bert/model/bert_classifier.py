@@ -1,4 +1,8 @@
-"""BERT 分类模型定义"""
+"""
+【暂未实际使用】BERT 文本分类算法中的模型定义，封装基于预训练 BERT 的两层全连接文本分类网络。
+
+BERT 分类模型定义
+"""
 
 import torch
 import torch.nn as nn

@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】文本分类算法的主训练入口，集成 BERT 编码、图构建及 CG3/LLGC/Manifold/MixText 等半监督方法。
+"""
+
 import os
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"

@@ -1,4 +1,5 @@
 """
+【暂未实际使用】适配文本分类的 FlexMatch 脚本，基于 BERT 嵌入进行半监督训练并输出预测。
 FlexMatch for Text Classification on Platform
 
 This script adapts FlexMatch for text classification tasks using BERT embeddings.

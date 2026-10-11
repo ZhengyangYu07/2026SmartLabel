@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】FixMatch 半监督图像分类的训练入口，组织有标签/无标签数据并进行半监督训练。
+"""
+
 import argparse
 import json
 import logging

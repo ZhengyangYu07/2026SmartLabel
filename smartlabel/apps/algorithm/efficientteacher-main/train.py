@@ -1,3 +1,10 @@
+"""
+目标检测训练入口（EfficientTeacher 框架，由 Django 侧以 conda 环境 efficientteacher 调用）。
+
+tasks.py 在“主动学习/微调”阶段启动本脚本：解析配置 → 按是否启用 SSOD 选择 Trainer
+→ 训练并在 val 上评估。注意本文件及其依赖属于 EfficientTeacher 上游代码，
+平台只做调用封装，未做业务改动。
+"""
 import os
 import torch
 import torch.distributed as dist
@@ -29,6 +36,7 @@ RANK = int(os.getenv('RANK', -1))
 WORLD_SIZE = int(os.getenv('WORLD_SIZE', 1))
 
 def parse_opt(known=False):
+    """解析命令行参数：--cfg 模型配置、opts 覆盖项、--local_rank（DDP 用）。"""
     parser = argparse.ArgumentParser()
     parser.add_argument('--cfg', type=str, default='', help='model.yaml path')
     parser.add_argument("opts",help="Modify config options using the command-line",default=None,nargs=argparse.REMAINDER)
@@ -38,6 +46,7 @@ def parse_opt(known=False):
     return opt
 
 def setup(cfg):
+    """初始化日志与输出目录并选择设备；DDP 模式下额外初始化进程组。"""
     set_logging(RANK)
     if RANK in [-1, 0]:
         print_args(FILE.stem, cfg)
@@ -60,6 +69,7 @@ def setup(cfg):
     return device
 
 def main(opt, callbacks=Callbacks()):
+    """加载配置，按是否启用 SSOD 选择 Trainer 并启动训练。"""
     # Checks
         # dist.init_process_group(backend="nccl" if dist.is_nccl_available() else "gloo")
     cfg = get_cfg()

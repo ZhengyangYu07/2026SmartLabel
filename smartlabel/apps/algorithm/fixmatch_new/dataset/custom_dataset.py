@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】FixMatch 半监督图像分类的自定义数据集，支持有标签/无标签图像读取与弱强增强。
+"""
+
 import os
 import torch
 from torch.utils.data import Dataset

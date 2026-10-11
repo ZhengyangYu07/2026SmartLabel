@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】ReTest 的特征-标签记忆队列实现。
+"""
 import torch
 from typing import Any, Tuple
 

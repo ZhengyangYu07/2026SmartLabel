@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】FixMatch 半监督图像分类的数据集模块，构建 CIFAR-10/100 的有标签/无标签数据及弱强增强。
+"""
+
 import logging
 import math
 

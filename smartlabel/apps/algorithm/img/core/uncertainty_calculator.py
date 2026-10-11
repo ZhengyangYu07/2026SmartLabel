@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】图像主动学习模块（img）的不确定性计算器，提供熵/最低置信度/间隔等度量并筛选样本。
+"""
+
 # core/uncertainty_calculator.py
 import torch
 import torch.nn.functional as F

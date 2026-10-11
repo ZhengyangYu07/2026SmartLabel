@@ -4,6 +4,10 @@ Run inference on images, videos, directories, streams, etc.
 
 Usage:
     $ python path/to/detect.py --source path/to/img.jpg --weights yolov5s.pt --img 640
+
+平台集成：tasks.py 以 conda 环境 efficientteacher 调用本脚本做目标检测推理，
+通过 --source/--weights/--classes/--save-txt 等参数把结果写成 YOLO label 文件，
+再由 Django 侧解析入库。本文件属 EfficientTeacher 上游代码，平台仅做调用封装。
 """
 
 import argparse
@@ -61,6 +65,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
         save_xml=False,
         save_kp=False
         ):
+    """对 source 指向的图片/目录执行检测，按参数保存可视化图与 label/XML 结果。"""
     source = str(source)
     # save_img = not nosave and not source.endswith('.txt')  # save inference images
     save_img = not nosave   # save inference images
@@ -378,6 +383,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
 
 
 def parse_opt():
+    """解析推理参数（权重、数据源、置信度/NMS 阈值、类别过滤、输出目录等）。"""
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'yolov5s.pt', help='model path(s)')
     parser.add_argument('--source', type=str, default=ROOT / 'data/images', help='file/dir/URL/glob, 0 for webcam')
@@ -413,6 +419,7 @@ def parse_opt():
 
 
 def main(opt):
+    """校验依赖后按参数执行推理。"""
     check_requirements(exclude=('tensorboard', 'thop'))
     run(**vars(opt))
 

@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】FixMatch 半监督图像分类的 RandAugment 强增强实现，提供多种图像增强算子。
+"""
+
 # code in this file is adpated from
 # https://github.com/ildoonet/pytorch-randaugment/blob/master/RandAugment/augmentations.py
 # https://github.com/google-research/fixmatch/blob/master/third_party/auto_augment/augmentations.py

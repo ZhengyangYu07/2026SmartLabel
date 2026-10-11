@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】文本分类算法中的 LLGC（局部与全局一致性学习）标签传播实现。
+"""
+
 import torch
 
 def normalize_adjacency(A):

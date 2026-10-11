@@ -1,3 +1,5 @@
+"""数据加载与标签编码工具：扫描图像目录、按标签 CSV 区分有/无标签样本，
+并把标签编码为整数 id 与 mask，供后续半监督图像分类流程使用。"""
 import pandas as pd
 import torch
 import os
@@ -30,7 +32,7 @@ import os
 #         return df
 
 def load_image_dataset(image_dir, label_csv=None, split=True):
-    """
+    """递归扫描图像目录，结合标签 CSV 将有标签样本与未标注样本分别整理成 DataFrame。
     Args:
         image_dir (str): 图像文件所在的目录（会递归搜索其所有子目录）。
         label_csv (str): 标签 CSV 文件（可选），需包含 'filename' 和 'class' 两列。
@@ -65,7 +67,7 @@ def load_image_dataset(image_dir, label_csv=None, split=True):
 
     # 有标签样本
     labeled_df = df.copy()
-    # 找到每个标记文件对应的真实路径
+    # 找到每个标记文件对应的真实路径（用 basename 匹配，容忍 CSV 只写文件名）
     filepath_map = {os.path.basename(path): path for _, path in all_files_with_paths}
     labeled_df["filepath"] = labeled_df["filename"].apply(lambda x: filepath_map.get(x, os.path.join(image_dir, x)))
     labeled_df["text"] = labeled_df["filepath"]
@@ -96,11 +98,13 @@ def load_image_dataset(image_dir, label_csv=None, split=True):
         return pd.concat([labeled_df, unlabeled_df], ignore_index=True)
 
 def encode_labels(labels):
-    label_set = sorted(set(l for l in labels if l != -1))
+    """把原始标签映射为从 0 开始的连续整数 id，未标注标签 -1 原样保留。"""
+    label_set = sorted(set(l for l in labels if l != -1))  # 收集全部有效类别名
     label2id = {l: i for i, l in enumerate(label_set)}
     id2label = {i: l for l, i in label2id.items()}
     encoded = torch.LongTensor([label2id[l] if l in label2id else -1 for l in labels])
     return encoded, label2id, id2label
 
 def get_mask(encoded_labels):
+    """生成有标签样本的布尔掩码（True=已标注，False=未标注，即标签为 -1）。"""
     return encoded_labels != -1

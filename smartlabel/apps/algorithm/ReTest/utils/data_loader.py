@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】ReTest 的自定义图像数据集与 DataLoader 构建工具。
+"""
 from typing import Tuple, Dict, Any, Optional, Callable
 import pandas as pd
 import torch

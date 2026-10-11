@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】文本分类算法中的流形分类器，结合 GCN 与拉普拉斯正则的半监督模型。
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as Func

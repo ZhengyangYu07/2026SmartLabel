@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】ReTest 的模型封装，按配置构建编码器与分类头。
+"""
 import torch.nn as nn
 import torch.nn.functional as F
 from models import cnn

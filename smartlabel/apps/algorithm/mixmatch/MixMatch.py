@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】MixMatch 半监督图像分类的实现，包含伪标签生成、MixUp 增强与简单 CNN 训练。
+"""
+
 import os
 import json
 import argparse

@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】图像主动学习模块（img）的数据管理器，扫描图像目录、加载标签并划分有标签/无标签数据。
+"""
+
 import torch
 from torch.utils.data import Dataset, DataLoader
 from typing import List, Dict, Optional, Tuple

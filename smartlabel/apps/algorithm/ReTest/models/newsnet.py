@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】ReTest 的 NewsNet 文本分类网络实现。
+"""
 from torch import nn
 import torch
 from typing import Union, Any

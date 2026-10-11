@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """
+【暂未实际使用】ReTest 的 VolMinNet 算法，用于从噪声标签估计转移矩阵 T。
 @file: VolMinNet.py
 @brief: Implementation of VolMinNet for estimating transition matrix T from noisy labels.
 @date: 2024-01-01

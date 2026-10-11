@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】ReTest 的投影/分类头定义（非线性投影头、MLP 头）。
+"""
 import torch
 import torch.nn as nn
 from typing import Union

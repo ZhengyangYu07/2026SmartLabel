@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】TorchSSL 的训练辅助工具（优化器、学习率调度、日志写入等）。
+"""
 import torch
 import torch.nn as nn
 try:

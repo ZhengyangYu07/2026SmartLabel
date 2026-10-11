@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】图像主动学习模块（img）的主入口/测试脚本，串联数据管理与不确定性计算。
+"""
+
 import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms

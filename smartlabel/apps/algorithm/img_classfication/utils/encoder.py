@@ -1,3 +1,5 @@
+"""CLIP 图像特征编码器：用 CLIP 把每张图像编码成特征向量（可选接一层 adapter 微调），
+输出作为后续建图与半监督分类的输入特征。"""
 import torch
 import torch.nn as nn
 import os
@@ -7,7 +9,9 @@ import clip
 
 
 class ImageCLIPEncoder:
+    """封装 CLIP 模型，负责批量读取图像并提取归一化前的图像特征向量。"""
     def __init__(self, config, device):
+        """加载 CLIP 模型并准备特征保存目录；adapter 延迟到知道特征维度后再构建。"""
         self.device = device
         self.config = config or {}
         self.image_dir = config["image_dir"]
@@ -23,6 +27,7 @@ class ImageCLIPEncoder:
         self.adapter = None  # 延迟构建，因为需要知道 CLIP 输出维度
 
     def _build_adapter(self, in_dim: int, cfg: dict) -> nn.Module:
+        """按配置构建维度不变的瓶颈 MLP adapter（输出维度等于输入维度），未启用则返回 None。"""
         enabled = bool(cfg.get("enabled", False))
         if not enabled:
             return None
@@ -57,8 +62,9 @@ class ImageCLIPEncoder:
         return nn.Sequential(*layers)
 
     def encode(self, image_names, batch_size=32, save_path=None):
+        """分批读取图像并用 CLIP 提取特征；读取失败的图像以零张量占位，返回拼接后的特征矩阵。"""
         embeddings = []
-        with torch.no_grad():
+        with torch.no_grad():  # 纯推理，不建计算图
             for i in range(0, len(image_names), batch_size):
                 batch_paths = image_names[i:i+batch_size]
                 images = []
@@ -69,7 +75,7 @@ class ImageCLIPEncoder:
                         images.append(self.preprocess(img))
                     except Exception as e:
                         print(f"[Warning] Failed to load image: {path} ({e})")
-                        images.append(torch.zeros(3, 224, 224))
+                        images.append(torch.zeros(3, 224, 224))  # 坏图用零图占位，保证 batch 对齐
                 images = torch.stack(images).to(self.device)
                 features = self.model.encode_image(images)
 

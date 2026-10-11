@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】TorchSSL 的通用工具（参数文件覆盖、网络构建、日志与统计等）。
+"""
 import os
 import time
 from torch.utils.tensorboard import SummaryWriter

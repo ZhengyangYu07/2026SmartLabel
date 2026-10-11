@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】ReTest 的 Wide ResNet 编码器实现。
+"""
 import torch
 import torch.nn as nn
 import torch.nn.init as init

@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】图像主动学习模块（img）的数据工具，负责扫描图像、加载标签 CSV 并划分数据集。
+"""
+
 import os
 import pandas as pd
 from typing import List, Tuple, Dict, Optional

@@ -1,3 +1,12 @@
+"""
+文本分类算法入口（由 Django 侧以 conda 环境 text_classification 调用）。
+
+流程：BERT 编码文本 → 可选四路半监督分类器（CG3 / LLGC / 流形正则 / MixText）
+→ 对未标注样本做多数投票融合 → 写出 result.csv。
+
+不确定性按已标注比例分阶段计算（early=熵、mid=熵与 margin 加权、late=1-置信度），
+平台“结果复核”页据此排序。已标注样本的置信度/不确定性字段统一写 -1。
+"""
 import os
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -31,6 +40,7 @@ from transformers import AutoConfig
 
 
 def _resolve_device(device_pref):
+    """解析设备偏好：指定 cuda 但不可用时自动回退到 CPU。"""
     device_name = str(device_pref or 'cpu').strip().lower()
     if device_name.startswith('cuda'):
         if torch.cuda.is_available():
@@ -41,6 +51,7 @@ def _resolve_device(device_pref):
 
 
 def _compute_uncertainty_stage(label_ratio, config):
+    """按已标注比例把训练阶段划为 early/mid/late，决定用哪种不确定性度量。"""
     r1 = float(config.get("uncertainty_stage_r1", 0.10))
     r2 = float(config.get("uncertainty_stage_r2", 0.40))
 
@@ -52,6 +63,7 @@ def _compute_uncertainty_stage(label_ratio, config):
 
 
 def _compute_uncertainty_components(prob_tensor):
+    """计算四种不确定性指标：归一化熵、BvSB(1-margin)、1-置信度、margin。"""
     probs = prob_tensor.clamp_min(1e-12)
     num_classes = int(probs.size(1))
 
@@ -79,15 +91,18 @@ def _compute_uncertainty_components(prob_tensor):
 
 
 def report_progress(base_progress, current_step, total_steps, stage_span):
+    """把某阶段的内部进度线性映射到全局进度并打印，供 Django 侧解析。"""
     progress = base_progress + (current_step / total_steps) * stage_span
     print(f"处理进度: {int(progress)}%", flush=True)
 
 
 def denormalize_embeddings(normalized_embeddings, norms):
+    """还原被归一化的 embedding（乘回原始模长）。"""
     return normalized_embeddings * norms.unsqueeze(1)
 
 
 def run_training(config_path):
+    """读取 config，执行多分类器半监督训练/推理，并把结果写入 result.csv。"""
     print("开始集成学习...")
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
@@ -304,6 +319,7 @@ def run_training(config_path):
         all_df["mixtext_pred"] = -1
 
     final_pred_indices = []
+    # 仅对未标注样本做多模型多数投票；已标注样本沿用原标签
     for index, row in all_df.iterrows():
         if index >= len(labeled_df):
             votes = [row.get("cg3_pred"), row.get("llgc_pred"), row.get("manifold_pred"), row.get("mixtext_pred")]
@@ -347,6 +363,7 @@ def run_training(config_path):
     if uncertainty_stage == "early":
         stage_uncertainty_scores = entropy_scores
     elif uncertainty_stage == "mid":
+        # 中期：熵与 margin 不确定性按权重加权
         stage_uncertainty_scores = [
             (mid_entropy_weight * e + mid_bvsb_weight * b)
             for e, b in zip(entropy_scores, bvsb_scores)
