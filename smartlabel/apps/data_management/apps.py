@@ -1,3 +1,4 @@
+"""数据管理应用的 AppConfig（应用名 data_management）。"""
 from django.apps import AppConfig
 
 

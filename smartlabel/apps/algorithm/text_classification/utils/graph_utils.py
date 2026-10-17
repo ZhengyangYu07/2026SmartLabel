@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】文本分类算法的图工具，构建 kNN 图并计算扩散映射特征。
+"""
+
 import numpy as np
 import torch
 from sklearn.metrics.pairwise import pairwise_kernels

@@ -1,4 +1,8 @@
-"""BiLSTM 情感分析训练入口。"""
+"""
+【暂未实际使用】基于 BiLSTM 的文本情感分析训练脚本。
+
+BiLSTM 情感分析训练入口。
+"""
 
 import argparse
 import csv

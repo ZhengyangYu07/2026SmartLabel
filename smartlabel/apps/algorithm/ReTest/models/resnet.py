@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】ReTest 的 ResNet 系列骨干网络实现（含预训练权重加载）。
+"""
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

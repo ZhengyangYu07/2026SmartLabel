@@ -1,8 +1,16 @@
+/**
+ * 基础任务明细页样式（base_task_detail）。
+ * 作用于任务数据明细表格：表头筛选/排序下拉、分页控件、校验状态标签、
+ * 标签搜索与结果列表，以及文本分类列的内容截断显示。
+ */
+
+/* 表格基础样式：固定布局、合并边框 */
 table {
     width: 100%;
     table-layout: fixed;
     border-collapse: collapse;
 }
+/* 表头单元格：灰色底、居中、相对定位（供下拉定位） */
 th {
     border: 1px solid #ccc;
     padding: 8px;
@@ -10,6 +18,7 @@ th {
     position: relative;
     background-color: #f2f2f2;
 }
+/* 数据单元格：居中、单行溢出隐藏 */
 td {
     border: 1px solid #ccc;
     padding: 8px;
@@ -20,10 +29,12 @@ td {
 
 
 
+/* 斑马纹：偶数行浅灰底 */
 tr:nth-child(even) {
     background-color: #f9f9f9;
 }
 
+/* 行悬停高亮 */
 tr:hover {
     background-color: #f1f1f1;
 }
@@ -151,6 +162,7 @@ tr:hover {
 
 
 
+/* 分页控件：按钮与页码信息 */
 .pagination {
     margin-top: 20px;
     text-align: center;
@@ -177,6 +189,7 @@ tr:hover {
 
 
 
+/* 校验状态标签：已校验（绿）/ 未校验（红） */
 .status-verified {
     background-color: #d4edda; /* 浅绿色 */
     color: #000; /* 文本颜色 */
@@ -291,6 +304,7 @@ tr:hover {
     margin-bottom: 4px; /* 调整间距 */
 }
 
+/* 文本内容列：限制宽度并单行省略号截断 */
 .text-content {
     max-width: 200px; /* 设置最大宽度 */
     white-space: nowrap; /* 禁止换行 */

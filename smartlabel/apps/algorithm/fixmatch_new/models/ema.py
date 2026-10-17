@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】FixMatch 半监督图像分类中的模型权重 EMA（指数移动平均）实现。
+"""
+
 from copy import deepcopy
 
 import torch

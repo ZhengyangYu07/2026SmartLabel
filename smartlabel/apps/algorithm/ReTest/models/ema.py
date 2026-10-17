@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】ReTest 的指数移动平均（EMA）模型参数更新工具。
+"""
 # https://github.com/wvangansbeke/Unsupervised-Classification/blob/master/utils/ema.py
 import torch.nn as nn
 

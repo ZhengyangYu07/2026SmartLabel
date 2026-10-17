@@ -1,3 +1,4 @@
+"""用户应用的 AppConfig（应用名 users）。"""
 from django.apps import AppConfig
 
 

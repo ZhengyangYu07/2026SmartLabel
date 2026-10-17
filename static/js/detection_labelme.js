@@ -1,5 +1,12 @@
+/**
+ * 目标检测标注页（LabelMe 风格）主脚本。
+ * 负责：标注画布上的矩形/多边形/点/线绘制与拖拽编辑、标注框的选择/改名/接受/拒绝、
+ * 撤销重做、缩放与居中、图片列表与分页加载、标签联想、标注结果保存与“完成当前图片”流转。
+ * 依赖页面提供的 window.detectionTaskId / detectionTaskLabels / detectionViewMode / currentImageItem 等全局变量。
+ */
 (() => {
   const taskId = window.detectionTaskId;
+  // 界面文案表（用 Unicode 转义书写，避免编码问题）
   const TXT = {
     unnamed: "\u672a\u547d\u540d",
     noImage: "\u8bf7\u9009\u62e9\u56fe\u7247",
@@ -42,10 +49,14 @@
     acceptAllWarn: "\u5f53\u524d\u662f\u4e3b\u52a8\u5b66\u4e60\u6837\u672c\uff0c\u4e0d\u5efa\u8bae\u5168\u90e8\u63a5\u53d7\uff0c\u8bf7\u9010\u6846\u5904\u7406\u3002",
   };
 
+  // 低置信度阈值：低于此值的框会被高亮提示
   const LOW_CONFIDENCE = 0.6;
+  // 主动学习样本的不确定性阈值
   const ACTIVE_UNCERTAINTY = 0.5;
+  // 占位标签名（无真实标签时使用）
   const PLACEHOLDER_LABEL = "obj";
 
+  // 缓存页面上的各类 DOM 元素引用
   const container = document.getElementById("draw-canvas-container");
   const imageEl = document.getElementById("detection-image");
   const selectBtn = document.getElementById("select-mode-btn");
@@ -80,6 +91,7 @@
   const toolButtons = [...document.querySelectorAll("[data-tool]")];
   const tabButtons = [...document.querySelectorAll(".det-tab")];
 
+  // 运行状态：当前模式/工具、形状集合、绘制与拖拽临时状态、分页、缩放、撤销栈等
   let mode = "draw";
   let activeTool = "rectangle";
   let shapes = [];
@@ -102,15 +114,18 @@
   let baseImageSize = { width: 0, height: 0 };
   let annotationsVisible = true;
 
+  // 将数值限制在 [0,1] 区间（坐标统一用归一化值存储）
   function clamp01(value) {
     return Math.max(0, Math.min(1, Number(value) || 0));
   }
 
+  // 数字格式化：非有限值显示为 "-"，否则保留指定小数位
   function fmt(value, digits = 3) {
     const number = Number(value);
     return Number.isFinite(number) ? number.toFixed(digits) : "-";
   }
 
+  // HTML 转义，防止把标签名等内容直接拼进 innerHTML 时被注入
   function escapeHtml(value) {
     return String(value ?? "")
       .replaceAll("&", "&amp;")
@@ -120,43 +135,52 @@
       .replaceAll("'", "&#039;");
   }
 
+  // 取形状的置信度，非法则返回 null
   function confidenceValue(shape) {
     const value = Number(shape.confidence);
     return Number.isFinite(value) ? value : null;
   }
 
+  // 处理决策状态文案（pending/accepted/rejected/modified）
   function decisionText(decision) {
     return TXT[decision] || TXT.pending;
   }
 
+  // 标注来源文案（人工新增 / 模型预测）
   function sourceText(source) {
     return source === "manual" ? TXT.manual : TXT.model;
   }
 
+  // 形状类型文案（矩形/多边形/点/线）
   function shapeName(shapeType) {
     return TXT[shapeType] || TXT.shape;
   }
 
+  // 读取当前图片的不确定性分数
   function currentUncertainty() {
     return Number(window.currentImageItem?.uncertainty_score || 0);
   }
 
+  // 判断当前图片是否属于主动学习样本（不确定性达标）
   function isActiveLearningSample() {
     return currentUncertainty() >= ACTIVE_UNCERTAINTY;
   }
 
+  // 按分数映射优先级文案（高/中/低）
   function priorityText(score) {
     if (score >= 0.7) return TXT.high;
     if (score >= 0.35) return TXT.medium;
     return TXT.low;
   }
 
+  // 切换绘制/选择模式，并同步光标样式与按钮高亮
   function setMode(nextMode) {
     mode = nextMode;
     selectBtn?.classList.toggle("active", mode === "select");
     if (container) container.style.cursor = mode === "select" ? "default" : "crosshair";
   }
 
+  // 切换标注工具（矩形/多边形/点/线），并清空未完成的绘制草稿
   function setTool(nextTool) {
     activeTool = nextTool;
     setMode("draw");
@@ -169,6 +193,7 @@
     });
   }
 
+  // 设置缩放比例（限制最小 0.1），按基准尺寸重算图片显示尺寸并重绘标注
   function setZoom(nextZoom) {
     const requestedZoom = Number(nextZoom);
     zoomScale = Math.max(0.1, Number.isFinite(requestedZoom) ? requestedZoom : 1);
@@ -183,6 +208,7 @@
     centerCanvas();
   }
 
+  // 显示/隐藏所有标注框，并更新按钮文案
   function setAnnotationsVisible(visible) {
     annotationsVisible = visible;
     container?.classList.toggle("annotations-hidden", !annotationsVisible);
@@ -191,6 +217,7 @@
     }
   }
 
+  // 根据画布是否超出视口，切换滚动容器的横向/纵向滚动标记
   function updateCanvasOverflow() {
     const viewport = container?.closest(".lm-canvas-area");
     if (!viewport) return;
@@ -199,6 +226,7 @@
     viewport.classList.toggle("canvas-overflow-y", container.offsetHeight + padding > viewport.clientHeight);
   }
 
+  // 将画布滚动到视口中央
   function centerCanvas() {
     const viewport = container?.closest(".lm-canvas-area");
     if (!viewport) return;
@@ -208,6 +236,7 @@
     });
   }
 
+  // 由标签文本哈希出一个稳定颜色，保证同一标签颜色一致
   function colorForLabel(label) {
     const text = label || TXT.unnamed;
     let hash = 0;
@@ -217,6 +246,7 @@
     return `hsl(${hash % 360}, 72%, 45%)`;
   }
 
+  // 按决策/来源/置信度决定标注框颜色
   function colorForShape(shape) {
     const conf = confidenceValue(shape);
     if (shape.decision === "rejected") return "#dc2626";
@@ -226,6 +256,7 @@
     return "#2563eb";
   }
 
+  // 读取图片当前显示尺寸（像素）
   function imageSize() {
     return {
       width: imageEl.clientWidth,
@@ -233,6 +264,7 @@
     };
   }
 
+  // 归一化坐标 -> 图片上的像素坐标
   function pointToPx(point) {
     const normalized = Array.isArray(point) ? point : [point?.x, point?.y];
     const size = imageSize();
@@ -242,6 +274,7 @@
     };
   }
 
+  // 鼠标事件的屏幕坐标 -> 图片归一化坐标（用于绘制）
   function toRelativeCoords(clientX, clientY) {
     const rect = imageEl.getBoundingClientRect();
     return {
@@ -250,6 +283,7 @@
     };
   }
 
+  // 懒创建承载 SVG 形状（多边形/线/点）的图层
   function ensureSvg() {
     if (svg) return svg;
     svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -258,6 +292,7 @@
     return svg;
   }
 
+  // 让 SVG 覆盖层尺寸与当前图片显示尺寸对齐
   function sizeOverlay() {
     const size = imageSize();
     const layer = ensureSvg();
@@ -267,11 +302,13 @@
     layer.style.height = `${size.height}px`;
   }
 
+  // 移除正在绘制中的临时草稿（如多边形预览线）
   function removeDraft() {
     draftEl?.remove();
     draftEl = null;
   }
 
+  // 清空全部标注框与 SVG 图层，重置选中/草稿状态
   function clearOverlays() {
     shapes.forEach((shape) => {
       shape.el?.remove();
@@ -286,6 +323,7 @@
     updateShapePanel();
   }
 
+  // 由点集计算包围盒（归一化坐标下的 min/max）
   function boundsFromPoints(points) {
     const xs = points.map((point) => clamp01(point[0]));
     const ys = points.map((point) => clamp01(point[1]));
@@ -297,6 +335,7 @@
     };
   }
 
+  // 计算标签文字的锚点位置（包围盒左上角）
   function anchorPoint(shape) {
     if (shape.points?.length) {
       const bounds = boundsFromPoints(shape.points);
@@ -305,12 +344,14 @@
     return [0, 0];
   }
 
+  // 拼接标签文字（含置信度）
   function labelText(shape) {
     const conf = confidenceValue(shape);
     const label = shape.label || TXT.unnamed;
     return conf === null ? label : `${label} ${fmt(conf, 2)}`;
   }
 
+  // 定位并刷新形状标签气泡的位置、颜色与文字
   function positionLabel(shape) {
     if (!shape.labelEl) return;
     const point = pointToPx(anchorPoint(shape));
@@ -320,6 +361,7 @@
     shape.labelEl.textContent = labelText(shape);
   }
 
+  // 为形状创建标签气泡 DOM
   function createLabel(shape) {
     const labelEl = document.createElement("div");
     labelEl.className = "bbox-label";
@@ -328,6 +370,7 @@
     positionLabel(shape);
   }
 
+  // 给矩形元素加上来源/状态/低置信/选中等样式类
   function applyRectangleClasses(shape) {
     if (!shape.el) return;
     shape.el.className = "bbox";
@@ -339,6 +382,7 @@
     if (shape === activeShape) shape.el.classList.add("bbox-active");
   }
 
+  // 渲染矩形：创建框体、四角拖拽手柄，并绑定选中/拖拽事件
   function renderRectangle(shape) {
     const el = document.createElement("div");
     el.addEventListener("mousedown", (event) => {
@@ -368,6 +412,7 @@
     positionShape(shape);
   }
 
+  // 将点集转换为 SVG polyline/polygon 的 "x,y" 坐标串
   function svgPoints(points) {
     return points
       .map((point) => {
@@ -377,6 +422,7 @@
       .join(" ");
   }
 
+  // 渲染 SVG 形状（点/线/多边形）并绑定点击选中
   function renderSvgShape(shape) {
     const layer = ensureSvg();
     let el;
@@ -408,6 +454,7 @@
     positionShape(shape);
   }
 
+  // 按类型把形状几何与颜色同步到其 DOM/SVG 元素
   function positionShape(shape) {
     if (!shape.el || !imageEl.clientWidth || !imageEl.clientHeight) return;
     sizeOverlay();
@@ -440,17 +487,20 @@
     positionLabel(shape);
   }
 
+  // 按形状类型分发渲染（矩形走 DOM，其余走 SVG）
   function renderShape(shape) {
     if (shape.shape_type === "rectangle") renderRectangle(shape);
     else renderSvgShape(shape);
   }
 
+  // 重绘全部形状（缩放/尺寸变化后调用）
   function rerenderShapes() {
     sizeOverlay();
     shapes.forEach(positionShape);
     renderDraft();
   }
 
+  // 选中某个形状（或取消选中），并同步标签下拉与对象面板
   function selectShape(shape) {
     activeShape = shape || null;
     shapes.forEach(positionShape);
@@ -458,6 +508,7 @@
     updateShapePanel();
   }
 
+  // 设置形状的决策状态（接受/拒绝/修改），默认记入撤销栈
   function setShapeDecision(shape, decision, record = true) {
     if (!shape) return;
     if (record) pushUndo();
@@ -467,12 +518,14 @@
     updateShapePanel();
   }
 
+  // 将形状标记为“已修改/人工来源”（模型框被人工编辑后调用）
   function markShapeModified(shape) {
     if (!shape) return;
     shape.source = "manual";
     shape.decision = shape.decision === "manual" ? "manual" : "modified";
   }
 
+  // 修改形状标签名，并同步标签候选与下拉选项
   function renameShape(shape, label, record = true) {
     if (!shape) return;
     if (record) pushUndo();
@@ -485,6 +538,7 @@
     updateShapePanel();
   }
 
+  // 删除当前选中形状；若正在画多边形则先清除草稿点
   function removeActiveShape() {
     if (draftPoints.length) {
       draftPoints = [];
@@ -503,6 +557,7 @@
     updateShapePanel();
   }
 
+  // 后端标注数据 -> 前端内部形状对象（统一坐标为两点包围盒）
   function annotationToShape(annotation, item) {
     const shapeType = annotation.shape_type || "rectangle";
     const hasModelConfidence = annotation.confidence !== undefined && annotation.confidence !== null && annotation.confidence !== "";
@@ -545,6 +600,7 @@
     };
   }
 
+  // 前端形状对象 -> 保存接口的 payload（矩形补充 x/y/w/h）
   function shapeToPayload(shape) {
     const payload = {
       shape_type: shape.shape_type,
@@ -564,6 +620,7 @@
     return payload;
   }
 
+  // 生成形状的轻量快照，用于撤销栈存储
   function shapeState(shape) {
     const state = {
       shape_type: shape.shape_type,
@@ -576,10 +633,12 @@
     return state;
   }
 
+  // 刷新撤销按钮可用状态
   function updateUndoState() {
     if (undoBtn) undoBtn.disabled = undoStack.length === 0 && draftPoints.length === 0;
   }
 
+  // 把当前形状集合快照压入撤销栈（最多保留 60 步）
   function pushUndo() {
     if (!window.currentImageItem) return;
     undoStack.push(shapes.map(shapeState));
@@ -588,6 +647,7 @@
     updateUndoState();
   }
 
+  // 由撤销快照重建全部形状并重新渲染
   function restoreShapes(snapshot) {
     shapes.forEach((shape) => {
       shape.el?.remove();
@@ -608,6 +668,7 @@
     updateShapePanel();
   }
 
+  // 撤销上一步：优先撤销多边形草稿点，否则弹出撤销栈快照
   function undoLastStep() {
     if (draftPoints.length) {
       draftPoints.pop();
@@ -626,6 +687,7 @@
     updateUndoState();
   }
 
+  // 渲染左侧标签列表面板
   function renderLabelList() {
     if (!labelListPanel) return;
     if (!loadedLabels.length) {
@@ -663,6 +725,7 @@
     });
   }
 
+  // 记录一个标签到候选列表（去重并排序）
   function rememberLabel(label) {
     const value = String(label || "").trim();
     if (!value || loadedLabels.includes(value)) return;
@@ -671,15 +734,18 @@
     removePlaceholderLabel();
   }
 
+  // 是否已加载到真实标签（非占位标签）
   function hasRealLoadedLabel() {
     return loadedLabels.some((label) => label !== PLACEHOLDER_LABEL);
   }
 
+  // 有真实标签时移除占位标签 "obj"
   function removePlaceholderLabel() {
     if (!hasRealLoadedLabel()) return;
     loadedLabels = loadedLabels.filter((label) => label !== PLACEHOLDER_LABEL);
   }
 
+  // 清掉形状上残留的占位标签名
   function clearPlaceholderShapeLabels() {
     if (!hasRealLoadedLabel()) return;
     shapes.forEach((shape) => {
@@ -687,6 +753,7 @@
     });
   }
 
+  // 重建标签下拉框选项，尽量保留原选中值
   function refreshLabelSelectOptions(selectedValue = null) {
     if (!labelSelect) return;
     removePlaceholderLabel();
@@ -706,23 +773,27 @@
     renderLabelList();
   }
 
+  // 从形状集合中汇总标签并刷新下拉选项
   function collectLabelsFromShapes(shapeList) {
     shapeList.forEach((shape) => rememberLabel(shape.label));
     refreshLabelSelectOptions(labelSelect?.value || shapeList[0]?.label || null);
   }
 
+  // 用任务预置标签初始化候选列表
   function seedTaskLabels() {
     if (!Array.isArray(window.detectionTaskLabels)) return;
     window.detectionTaskLabels.forEach(rememberLabel);
     refreshLabelSelectOptions();
   }
 
+  // 按关键词过滤标签候选
   function matchingLabels(searchText) {
     const keyword = String(searchText || "").trim().toLowerCase();
     if (!keyword) return [...loadedLabels];
     return loadedLabels.filter((label) => label.toLowerCase().includes(keyword));
   }
 
+  // 在对象行的标签输入框下渲染联想候选
   function renderInlineLabelSuggestions(input) {
     const index = input.dataset.labelInput;
     const list = objectList?.querySelector(`[data-label-suggestions="${index}"]`);
@@ -750,11 +821,13 @@
     list.classList.add("visible");
   }
 
+  // 隐藏标签联想候选列表
   function hideInlineLabelSuggestions(input) {
     const list = objectList?.querySelector(`[data-label-suggestions="${input.dataset.labelInput}"]`);
     list?.classList.remove("visible");
   }
 
+  // 排序形状用于对象面板展示：低置信、待处理优先，再按置信度升序
   function sortedShapeEntries() {
     return shapes
       .map((shape, index) => ({ shape, index }))
@@ -771,6 +844,7 @@
       });
   }
 
+  // 渲染右侧对象面板：每个标注框的名称/置信度/状态/接受-修改-拒绝按钮
   function updateShapePanel() {
     if (boxCountChip) boxCountChip.textContent = `${shapes.length} ${TXT.shapeCount}`;
     if (!objectList) return;
@@ -846,6 +920,7 @@
     renderLabelList();
   }
 
+  // 加载标签：合并任务预置标签与接口返回的标签
   async function loadLabels() {
     if (labelSelect) labelSelect.innerHTML = `<option value="">${TXT.chooseLabel}</option>`;
     seedTaskLabels();
@@ -862,15 +937,18 @@
     }
   }
 
+  // 判断图片校验状态文案（已校验/未校验）
   function statusLabel(item) {
     const raw = String(item.raw_status || item.status || "").toLowerCase();
     return raw.includes("verified") && !raw.includes("unverified") ? TXT.verified : TXT.unverified;
   }
 
+  // 当前是否处于“已标注视图”模式
   function isLabeledView() {
     return (window.detectionViewMode || "labeled") === "labeled";
   }
 
+  // 刷新样本信息区：模式徽标、不确定性、策略、模型版本、优先级
   function updateSampleInfo(item) {
     const uncertainty = Number(item?.uncertainty_score || 0);
     const active = uncertainty >= ACTIVE_UNCERTAINTY;
@@ -889,6 +967,7 @@
     if (samplePriority) samplePriority.textContent = priorityText(uncertainty);
   }
 
+  // 刷新队列信息：当前进度、总数、优先级、预计剩余
   function updateQueueInfo() {
     const position = currentPage > 0 && currentItemIndex >= 0
       ? (currentPage - 1) * 12 + currentItemIndex + 1
@@ -901,6 +980,7 @@
     }
   }
 
+  // 打开指定图片：重置状态、载入标注、设置图片源并在 onload 后渲染
   function openImage(item) {
     window.currentImageItem = item;
     currentItemIndex = currentItems.findIndex((candidate) => String(candidate.id) === String(item.id));
@@ -947,6 +1027,7 @@
     });
   }
 
+  // 渲染左侧图片列表，并自动打开指定（或第一张）图片
   function renderImageList(items, preferredItemId = null, preferredIndex = 0) {
     currentItems = items;
     currentItemIndex = -1;
@@ -995,6 +1076,7 @@
     openImage(preferredItem || items[fallbackIndex]);
   }
 
+  // 渲染分页控件（上一页/下一页）并绑定翻页事件
   function renderPager(data) {
     const page = Number(data.page || 1);
     const totalPages = Number(data.total_pages || 1);
@@ -1008,6 +1090,7 @@
     document.getElementById("det-next-page")?.addEventListener("click", () => navigateToPage(page + 1));
   }
 
+  // 按视图模式/状态/排序构造查询参数，请求某页图片数据
   async function fetchDetectionPage(page = 1) {
     const params = new URLSearchParams({ page: String(page), page_size: "12" });
     const viewMode = window.detectionViewMode || "labeled";
@@ -1028,6 +1111,7 @@
     return response.json();
   }
 
+  // 加载指定页：请求数据后渲染列表与分页
   async function loadDetectionPage(page = 1, preferredItemId = null, preferredIndex = 0) {
     currentPage = Math.max(1, page);
     imageList.innerHTML = `<div class="det-empty">${TXT.loading}</div>`;
@@ -1042,6 +1126,7 @@
     }
   }
 
+  // 调用页面的全局统计刷新函数更新任务进度
   async function refreshTaskStats() {
     if (typeof window.refreshTaskStatistics !== "function") return;
     try {
@@ -1051,6 +1136,7 @@
     }
   }
 
+  // 保存标注：POST 到保存接口，成功后清空撤销栈与未保存标记
   async function persistShapes(modeOverride = null) {
     if (!window.currentImageItem) {
       window.showMessage(TXT.saveFirst, "warning");
@@ -1078,6 +1164,7 @@
     return data;
   }
 
+  // 切换图片/翻页前的自动保存（有未保存改动时执行）
   async function saveBeforeLeaving() {
     if (!window.currentImageItem || !hasUnsavedChanges) return true;
     try {
@@ -1090,17 +1177,20 @@
     }
   }
 
+  // 切换到另一张图片（先自动保存当前改动）
   async function navigateToImage(item) {
     if (!item || String(item.id) === String(window.currentImageItem?.id)) return;
     if (!(await saveBeforeLeaving())) return;
     openImage(item);
   }
 
+  // 翻到指定页（先自动保存当前改动）
   async function navigateToPage(page) {
     if (!(await saveBeforeLeaving())) return;
     await loadDetectionPage(page);
   }
 
+  // 点击“保存”按钮：保存后提示并刷新当前页（停留在原图片）
   async function saveShapes() {
     try {
       await persistShapes();
@@ -1112,6 +1202,7 @@
     }
   }
 
+  // 完成当前图片：接受所有非拒绝框、保存，然后跳到下一张/下一页
   async function completeCurrentImage() {
     if (!window.currentImageItem) {
       window.showMessage(TXT.saveFirst, "warning");
@@ -1140,6 +1231,7 @@
     }
   }
 
+  // 绘制多边形/线的实时预览（黄色虚线）
   function renderDraft(extraPoint = null) {
     removeDraft();
     if (!draftPoints.length && !extraPoint) return;
@@ -1160,6 +1252,7 @@
     layer.appendChild(draftEl);
   }
 
+  // 新增一个形状（默认人工来源），压入撤销栈、渲染并选中
   function addShape(shape) {
     pushUndo();
     shapes.push({
@@ -1171,6 +1264,7 @@
     selectShape(shapes[shapes.length - 1]);
   }
 
+  // 收尾多边形（至少 3 个点）
   function finishPolygon() {
     if (draftPoints.length < 3) return;
     addShape({
@@ -1184,6 +1278,7 @@
     updateUndoState();
   }
 
+  // 收尾直线（取前 2 个点）
   function finishLine() {
     if (draftPoints.length < 2) return;
     addShape({
@@ -1197,19 +1292,24 @@
     updateUndoState();
   }
 
+  // 根据草稿点数决定“完成多边形”按钮是否可用
   function updateFinishPolygonState() {
     if (!finishPolygonBtn) return;
     finishPolygonBtn.disabled = !(activeTool === "polygon" && draftPoints.length >= 3);
   }
 
+  // 两点间归一化距离（用于判断多边形是否闭合成环）
   function distance(a, b) {
     return Math.hypot(clamp01(a[0]) - clamp01(b[0]), clamp01(a[1]) - clamp01(b[1]));
   }
 
+  // —— 事件绑定区 ——
+  // 工具按钮：切换当前标注工具
   toolButtons.forEach((button) => {
     button.addEventListener("click", () => setTool(button.dataset.tool || "rectangle"));
   });
   finishPolygonBtn?.addEventListener("click", finishPolygon);
+  // 右侧标签页切换（对象面板/标签面板等）
   tabButtons.forEach((button) => {
     button.addEventListener("click", () => {
       tabButtons.forEach((tab) => tab.classList.toggle("active", tab === button));
@@ -1218,11 +1318,13 @@
       });
     });
   });
+  // 工具栏按钮：选择模式/删除/保存/完成/撤销/全部接受
   selectBtn?.addEventListener("click", () => setMode("select"));
   deleteBtn?.addEventListener("click", removeActiveShape);
   saveBtn?.addEventListener("click", saveShapes);
   completeImageBtn?.addEventListener("click", completeCurrentImage);
   undoBtn?.addEventListener("click", undoLastStep);
+  // “全部接受”：把所有模型框标为已接受（拒绝的除外）
   acceptAllBtn?.addEventListener("click", () => {
     pushUndo();
     shapes.forEach((shape) => {
@@ -1231,6 +1333,7 @@
     });
     updateShapePanel();
   });
+  // 上一张：本页内切换，到页首则跳到上一页最后一张
   prevImageBtn?.addEventListener("click", async () => {
     if (currentItemIndex > 0) {
       navigateToImage(currentItems[currentItemIndex - 1]);
@@ -1241,6 +1344,7 @@
       await loadDetectionPage(currentPage - 1, null, 11);
     }
   });
+  // 下一张：本页内切换，到页尾则跳到下一页第一张
   nextImageBtn?.addEventListener("click", async () => {
     if (currentItemIndex >= 0 && currentItemIndex < currentItems.length - 1) {
       navigateToImage(currentItems[currentItemIndex + 1]);
@@ -1251,23 +1355,28 @@
       await loadDetectionPage(currentPage + 1, null, 0);
     }
   });
+  // 缩放/适配窗口/显示隐藏标注框；筛选与排序变化时回到第 1 页
   zoomInBtn?.addEventListener("click", () => setZoom(zoomScale * 1.15));
   zoomOutBtn?.addEventListener("click", () => setZoom(zoomScale / 1.15));
   fitWindowBtn?.addEventListener("click", () => setZoom(1));
   toggleAnnotationsBtn?.addEventListener("click", () => setAnnotationsVisible(!annotationsVisible));
   statusFilter?.addEventListener("change", () => navigateToPage(1));
   sortSelect?.addEventListener("change", () => navigateToPage(1));
+  // 窗口尺寸变化时重绘标注并刷新滚动状态
   window.addEventListener("resize", rerenderShapes);
   window.addEventListener("resize", updateCanvasOverflow);
 
+  // 鼠标按下：矩形工具下开始拉框绘制
   container?.addEventListener("mousedown", (event) => {
     if (mode !== "draw" || activeTool !== "rectangle" || !window.currentImageItem) return;
     drawing = true;
     dragStart = toRelativeCoords(event.clientX, event.clientY);
   });
 
+  // 鼠标移动：拖拽调整矩形手柄 / 预览多边形与线 / 拖拽绘制新矩形
   container?.addEventListener("mousemove", (event) => {
     if (rectEdit) {
+      // 拖拽矩形四角手柄：根据手柄方位更新对应边并规范化坐标
       const current = toRelativeCoords(event.clientX, event.clientY);
       const { shape, handle, bounds } = rectEdit;
       let minX = bounds.minX;
@@ -1294,6 +1403,7 @@
       return;
     }
     if (!drawing || !dragStart) return;
+    // 实时更新临时矩形框（未提交）
     const current = toRelativeCoords(event.clientX, event.clientY);
     const x = Math.min(dragStart.x, current.x);
     const y = Math.min(dragStart.y, current.y);
@@ -1312,6 +1422,7 @@
     container._tmp.style.height = `${h * size.height}px`;
   });
 
+  // 鼠标松开：结束矩形拖拽并生成标注框（过小的框忽略）
   window.addEventListener("mouseup", (event) => {
     if (rectEdit) {
       rectEdit = null;
@@ -1335,6 +1446,7 @@
     });
   });
 
+  // 单击画布：点工具直接落点，多边形/线工具追加顶点（多边形点回起点自动闭合）
   container?.addEventListener("click", (event) => {
     if (mode === "select" || !window.currentImageItem) return;
     if (activeTool === "rectangle") return;
@@ -1359,12 +1471,14 @@
     if (activeTool === "line" && draftPoints.length >= 2) finishLine();
   });
 
+  // 双击画布：完成当前多边形绘制
   container?.addEventListener("dblclick", (event) => {
     if (mode !== "draw" || activeTool !== "polygon") return;
     event.preventDefault();
     finishPolygon();
   });
 
+  // 键盘快捷键：Enter 完成多边形、Esc 取消草稿、Delete 删除、A 接受、R 拒绝、数字键快速套用标签
   document.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && activeTool === "polygon") finishPolygon();
     if (event.key === "Escape") {
@@ -1386,6 +1500,7 @@
     }
   });
 
+  // 标签下拉切换：为当前选中框改名，模型框会被标记为已修改
   labelSelect?.addEventListener("change", () => {
     if (!activeShape) {
       renderLabelList();
@@ -1402,6 +1517,7 @@
     updateShapePanel();
   });
 
+  // 页面初始化：加载标签、默认矩形工具与排序，加载第 1 页图片
   document.addEventListener("DOMContentLoaded", async () => {
     await loadLabels();
     setTool("rectangle");

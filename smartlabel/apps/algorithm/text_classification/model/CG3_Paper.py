@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】文本分类算法中的 CG3 图神经网络模型定义，包含局部/全局视图的 GCN 编码器。
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

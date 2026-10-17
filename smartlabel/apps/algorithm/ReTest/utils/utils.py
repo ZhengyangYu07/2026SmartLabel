@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】ReTest 的通用工具函数集合（随机种子、设备选择、评估指标等）。
+"""
 import os
 import shutil
 import torch

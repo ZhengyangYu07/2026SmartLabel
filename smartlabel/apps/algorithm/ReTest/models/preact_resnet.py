@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】ReTest 的预激活 ResNet（PreActResNet）实现。
+"""
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

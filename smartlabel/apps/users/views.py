@@ -1,3 +1,8 @@
+"""
+用户模块视图：登录/注册、首页、个人中心、修改密码、帮助文档与反馈。
+
+除登录、注册、修改密码含实际逻辑外，其余多为直接渲染模板的页面视图。
+"""
 from django.contrib import messages
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.models import User
@@ -11,6 +16,7 @@ def welcome(request):
 
 
 def user_login(request):
+    """登录：POST 校验账号密码，成功后跳转 next 或首页。"""
     if request.method == 'POST':
         username = request.POST.get('username', '').strip()
         password = request.POST.get('password', '').strip()
@@ -42,6 +48,7 @@ def user_login(request):
 
 
 def user_register(request):
+    """注册：校验必填、密码一致性与复杂度、用户名/邮箱唯一性，通过后自动登录。"""
     if request.method == 'POST':
         username = request.POST.get('username', '').strip()
         email = request.POST.get('email', '').strip().lower()
@@ -154,6 +161,7 @@ def profile(request):
 
 @login_required
 def change_password(request):
+    """修改密码：校验旧密码与两次新密码一致后更新，并保持会话不失效。"""
     if request.method == 'POST':
         old_password = request.POST.get('old_password')
         new_password1 = request.POST.get('new_password1')
@@ -199,6 +207,7 @@ def feedback(request):
 
 
 def submit_feedback(request):
+    """提交反馈：当前仅提示成功，未做持久化（预留接口）。"""
     if request.method == 'POST':
         # 你可以将反馈保存到数据库，或发送邮件等
         messages.success(request, '感谢您的反馈！')

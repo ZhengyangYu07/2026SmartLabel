@@ -1,4 +1,7 @@
 
+"""图构建工具：基于 CLIP 特征构建 KNN 相似图（局部图）与扩散映射图（全局图），
+作为 CG3/LLGC/流形正则等半监督分类器的图结构输入。"""
+
 import torch
 import faiss
 import numpy as np
@@ -7,19 +10,20 @@ from scipy.sparse import csr_matrix
 from sklearn.decomposition import TruncatedSVD
 
 def build_knn_graph(X, k=5):
-    X_np = torch.nn.functional.normalize(X, dim=1).cpu().numpy()
-    index = faiss.IndexFlatIP(X_np.shape[1])
+    """用归一化特征的内积近邻构建 KNN 稀疏邻接矩阵（无权重，边值为 1，不含自环）。"""
+    X_np = torch.nn.functional.normalize(X, dim=1).cpu().numpy()  # L2 归一化后内积等价余弦相似度
+    index = faiss.IndexFlatIP(X_np.shape[1])  # 内积索引，加速近邻检索
     index.add(X_np)
-    D, I = index.search(X_np, k + 1)
+    D, I = index.search(X_np, k + 1)  # 多取 1 个，便于后续排除自身
 
     rows, cols = [], []
     for i in range(X_np.shape[0]):
         for j in I[i]:
-            if i != j:
+            if i != j:  # 去掉自环
                 rows.append(i)
                 cols.append(j)
     indices = torch.tensor([rows, cols], dtype=torch.long)
-    values = torch.ones(len(rows), dtype=torch.float32)
+    values = torch.ones(len(rows), dtype=torch.float32)  # 0/1 无权边
     A = torch.sparse_coo_tensor(indices, values, size=(X_np.shape[0], X_np.shape[0]))
     return A.coalesce()
 
@@ -46,14 +50,14 @@ def compute_diffusion_map(X, k=10, sigma=1.0):
         for j in range(k):
             idx = indices[i, j]
             dist = distances[i, j]
-            sim = np.exp(-dist ** 2 / (2 * sigma ** 2))
+            sim = np.exp(-dist ** 2 / (2 * sigma ** 2))  # 高斯核把距离转成相似度权重
             rows.append(i)
             cols.append(idx)
             vals.append(sim)
 
     # 构造稀疏矩阵并对称化
     W = csr_matrix((vals, (rows, cols)), shape=(N, N))
-    W = (W + W.T) / 2  # 对称化
+    W = (W + W.T) / 2  # 对称化：KNN 有向边变为无向边，保证图是半正定的
 
     # 转换为 PyTorch 稀疏张量
     W_coo = W.tocoo()

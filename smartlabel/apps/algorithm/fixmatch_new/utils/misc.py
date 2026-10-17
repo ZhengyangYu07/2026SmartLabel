@@ -1,6 +1,9 @@
-'''Some helper functions for PyTorch, including:
+"""
+【暂未实际使用】FixMatch 半监督图像分类的通用工具，提供数据集均值方差计算、准确率与 AverageMeter。
+
+Some helper functions for PyTorch, including:
     - get_mean_and_std: calculate the mean and std value of dataset.
-'''
+"""
 import logging
 
 import torch

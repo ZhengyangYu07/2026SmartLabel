@@ -1,7 +1,8 @@
 """
-Django base settings for smartlabel project.
+Django 基础配置：所有环境共用，不含敏感信息（SECRET_KEY 等在 dev/prov 中覆盖）。
 
-包含所有环境的通用配置，不应包含敏感信息
+除常规 Django 配置外，本文件集中定义了 Celery 的全部 CELERY_* 配置
+（Broker/结果后端、队列与路由、超时、内存回收、日志），是任务系统的主要配置来源。
 """
 
 import os
@@ -114,8 +115,10 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 
 # === 任务执行与持久化 ===
+# 任务执行完成后才确认（ack），Worker 意外退出时任务可被重新投递，避免任务丢失
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_REJECT_ON_WORKER_LOST = True
+# 每个 Worker 一次只预取 1 个任务：任务耗时长且耗时差异大，避免任务在进程间排队不均
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 
 # === 超时设置 ===
@@ -161,7 +164,9 @@ CELERY_RESULT_EXPIRES = 7200  # 结果2小时后过期
 # === 任务路由配置 ===
 from kombu import Queue, Exchange
 
-# 1. 定义所有你会用到的队列
+# 1. 定义所有会用到的队列
+#    注意：README 中的 worker 命令还监听了 pretrained_tasks，但此处并未定义该队列；
+#    由于 CELERY_TASK_CREATE_MISSING_QUEUES=True，监听不存在的队列不会报错（只是收不到消息）。
 CELERY_TASK_QUEUES = (
     Queue('default', Exchange('default'), routing_key='default'),
     Queue('annotation_tasks', Exchange('annotation_tasks'), routing_key='annotation_tasks'),

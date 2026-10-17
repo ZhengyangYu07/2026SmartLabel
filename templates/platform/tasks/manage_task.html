@@ -1,4 +1,5 @@
 {% extends 'platform/components/base.html' %}
+<!-- 任务管理页：按状态/类型/名称筛选任务卡片，含分页与详情弹窗 -->
 {% load static %}
 
 {% block title %}
@@ -11,6 +12,7 @@
 
 {% block content %}
 <style>
+    /* 页面样式：状态按钮 / 收藏星标 / 任务卡片 */
     .status-btn{
         transition-property: background-color, color; /* 明确指定过渡属性 */
         transition-duration: 200ms;

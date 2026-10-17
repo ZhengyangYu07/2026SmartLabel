@@ -1,3 +1,13 @@
+"""
+目标检测半监督闭环服务。
+
+负责把“人工标注/复核”的结果回写到三张闭环表：
+- 依据人工确认的标注写入 PositiveIndex（正样本索引）；
+- 若原本无框、人工补框，则额外记一条 MissFixTable（漏检补框事件）；
+- 每次写入使索引版本 +1，并把过期的复核队列缓存标记为待重算。
+
+对外入口：apply_detection_loop_update（人工提交后调用）、persist_review_queue_items（生成候选队列时调用）。
+"""
 from django.db import transaction
 from django.db.models import Max
 
@@ -7,15 +17,18 @@ from ..models import MissFixTable, PositiveIndex, ReviewQueueCache
 
 
 def _sample_id(task_id, image_name):
+    """生成全局唯一的样本标识，与算法侧约定格式一致。"""
     return f"task-{task_id}:{image_name}"
 
 
 def _annotation_label(annotation):
+    """取出标注的类别名，非字典或空值一律返回空串。"""
     label = annotation.get('label') if isinstance(annotation, dict) else ''
     return str(label or '').strip()
 
 
 def _is_positive_annotation(annotation):
+    """判断标注是否为“有效正样本”：有类别、未被驳回、且几何信息有效。"""
     if not isinstance(annotation, dict):
         return False
     if not _annotation_label(annotation):
@@ -29,6 +42,7 @@ def _is_positive_annotation(annotation):
 
 
 def _is_manual_annotation(annotation):
+    """判断标注是否由人工产生（而非模型原始输出）。"""
     if not _is_positive_annotation(annotation):
         return False
     source = annotation.get('source')
@@ -37,6 +51,7 @@ def _is_manual_annotation(annotation):
 
 
 def _positive_labels(annotations, manual_only=False):
+    """收集标注中的正样本类别，去重并保持出现顺序。"""
     labels = []
     for annotation in annotations or []:
         if manual_only and not _is_manual_annotation(annotation):
@@ -50,6 +65,7 @@ def _positive_labels(annotations, manual_only=False):
 
 
 def _next_index_version(task):
+    """下一个索引版本号 = 当前最大版本 + 1。"""
     current = (
         PositiveIndex.objects
         .filter(task=task)
@@ -60,6 +76,7 @@ def _next_index_version(task):
 
 
 def get_current_index_version(task):
+    """当前生效（is_active）索引的最高版本号，无记录时为 0。"""
     current = (
         PositiveIndex.objects
         .filter(task=task, is_active=True)
@@ -70,6 +87,7 @@ def get_current_index_version(task):
 
 
 def get_next_queue_version(task):
+    """下一个复核队列版本号 = 当前最大队列版本 + 1。"""
     current = (
         ReviewQueueCache.objects
         .filter(task=task)
@@ -80,9 +98,15 @@ def get_next_queue_version(task):
 
 
 def merge_positive_index_context(task, base_context):
+    """把数据库中的正样本索引合并进算法上下文，供挑样本时使用。
+
+    产出/更新这些键：class_counts（类别计数）、positive_features（正样本特征）、
+    labeled_features（已标注特征）、index_version、miss_fix_count。
+    """
     context = dict(base_context or {})
     entries = list(PositiveIndex.objects.filter(task=task, is_active=True))
     if not entries:
+        # 无索引时给出默认值，保证下游评分函数不会因缺键报错
         context.setdefault('index_version', 0)
         context.setdefault('miss_fix_count', 0)
         context.setdefault('queue_repeat_ratio', 0.0)
@@ -121,6 +145,12 @@ def merge_positive_index_context(task, base_context):
 
 
 def apply_detection_loop_update(task, item, previous_annotations, normalized_annotations, operator=None, queue_version=None):
+    """人工提交标注后回写闭环状态。
+
+    - previous_annotations 为空（原本无框）而本次有框 → 记为 miss_fix（漏检补框）；
+    - 否则记为 manual_positive（人工确认正样本）。
+    返回写入摘要；若本次没有有效人工标注则返回 None（不做任何写入）。
+    """
     previous_count = sum(1 for annotation in previous_annotations or [] if _is_positive_annotation(annotation))
     labels = _positive_labels(normalized_annotations, manual_only=True)
     if not labels:
@@ -132,6 +162,7 @@ def apply_detection_loop_update(task, item, previous_annotations, normalized_ann
     next_version = _next_index_version(task)
     miss_fix_event = None
 
+    # 事件记录与正样本索引必须同事务写入，避免出现“有事件无索引”的不一致状态
     with transaction.atomic():
         if source_type == 'miss_fix':
             miss_fix_event = MissFixTable.objects.create(
@@ -151,6 +182,7 @@ def apply_detection_loop_update(task, item, previous_annotations, normalized_ann
             )
 
         for label in labels:
+            # 同一 (任务, 图片, 类别, 来源) 只保留一条，重复提交时覆盖并刷新特征/版本
             PositiveIndex.objects.update_or_create(
                 task=task,
                 image_result=item,
@@ -168,6 +200,7 @@ def apply_detection_loop_update(task, item, previous_annotations, normalized_ann
         if miss_fix_event:
             miss_fix_event.index_write_status = 'written'
             miss_fix_event.save(update_fields=['index_write_status'])
+            # 索引已更新，旧的无框候选队列基于过期索引，标记为待重算
             ReviewQueueCache.objects.filter(
                 task=task,
                 branch_type='final_empty',
@@ -183,6 +216,11 @@ def apply_detection_loop_update(task, item, previous_annotations, normalized_ann
 
 
 def persist_review_queue_items(task, rows, queue_version, progress_callback=None):
+    """把本次挑出的复核候选写入 ReviewQueueCache。
+
+    rows 为算法侧产出的候选列表（含 image_name、评分与 review_detail）；
+    progress_callback(index, total) 用于向任务进度回传。
+    """
     result_ids = {
         item.image_name: item
         for item in task.results.filter(image_name__in=[row.get('image_name') for row in rows])

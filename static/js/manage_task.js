@@ -1,5 +1,12 @@
+/**
+ * 任务管理页（manage_task）脚本。
+ * 负责任务列表的筛选/搜索/分页、任务卡片的渲染（进度条、状态、收藏星标）、
+ * 收藏切换、删除任务，以及对进行中任务的进度轮询刷新。
+ * 全部逻辑封装在 TaskManager 对象中，页面加载后初始化。
+ */
 document.addEventListener("DOMContentLoaded", () => {
   const TaskManager = {
+    // 运行时配置：每页条数、当前页、总页数、以及各任务的轮询定时器
     config: {
       tasksPerPage: 12,
       currentPage: 1,
@@ -7,6 +14,7 @@ document.addEventListener("DOMContentLoaded", () => {
       pollingIntervals: new Map(),
     },
 
+    // 各状态对应的指示点颜色（Tailwind 类）
     statusColors: {
       pending: "bg-gray-400",
       processing: "bg-blue-400",
@@ -15,6 +23,7 @@ document.addEventListener("DOMContentLoaded", () => {
       failed: "bg-red-400",
     },
 
+    // 各状态的中文文案
     statusTexts: {
       pending: "等待中",
       processing: "进行中",
@@ -23,12 +32,14 @@ document.addEventListener("DOMContentLoaded", () => {
       failed: "失败",
     },
 
+    // 任务类型标识 -> 中文名
     taskTypes: {
       "image-classification": "图像分类",
       "text-classification": "文本分类",
       "object-detection": "目标检测",
     },
 
+    // 当前生效的筛选条件：状态多选、任务类型、任务名关键词
     filters: {
       selectedStatus: [],
       taskType: "",
@@ -36,6 +47,7 @@ document.addEventListener("DOMContentLoaded", () => {
     },
 
     // 收藏功能
+    // 切换任务收藏状态：请求接口、更新星标、收藏时把卡片移到列表最前
     toggleFavorite: async function (taskId, starElement) {
       console.log("toggleFavorite 被调用，参数:", { taskId, starElement });
       try {
@@ -111,6 +123,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     },
     // 新增：统一星标显示更新
+    // 更新星标的图标、颜色与提示文字
     updateStarDisplay: function (starElement, isFavorite) {
       if (isFavorite) {
         starElement.classList.add("is-favorite"); // 添加新的CSS类
@@ -126,6 +139,7 @@ document.addEventListener("DOMContentLoaded", () => {
     },
 
     // 广播收藏状态变化
+    // 收藏变化后通知侧栏收藏列表，并用 postMessage 同步给其他页面
     broadcastFavoriteChange: function (taskId, isFavorite) {
       // 通知其他页面更新收藏列表
       if (typeof updateSavedTasksList === "function") {
@@ -143,6 +157,7 @@ document.addEventListener("DOMContentLoaded", () => {
       );
     },
     // 显示提示消息
+    // 显示顶部浮层提示（1.5 秒后淡出移除）
     showToast: function (message, type = "info") {
       const toast = document.createElement("div");
       // 完全使用base_task.html中的样式
@@ -173,6 +188,7 @@ document.addEventListener("DOMContentLoaded", () => {
     },
 
     // 筛选任务方法
+    // 绑定筛选交互：状态按钮多选切换、类型下拉与名称搜索
     bindFilterEvents() {
       // 初始化时显示所有任务
       this.filters.selectedStatus = [];
@@ -234,6 +250,7 @@ document.addEventListener("DOMContentLoaded", () => {
     },
 
     // 按钮状态更新
+    // 根据已选状态同步状态按钮的高亮样式
     updateButtonStatus() {
       document.querySelectorAll(".status-btn").forEach((btn) => {
         const status = btn.dataset.status;
@@ -253,6 +270,7 @@ document.addEventListener("DOMContentLoaded", () => {
     },
 
     // 筛选状态更新
+    // 把当前筛选条件汇总成文字提示显示在“当前筛选”区域
     updateFilterStatus() {
       const statusMapping = {
         pending: "等待中",
@@ -280,6 +298,7 @@ document.addEventListener("DOMContentLoaded", () => {
     },
 
     // 获取任务列表
+    // 按筛选条件与分页参数请求任务列表
     async fetchTasks() {
       try {
         const params = new URLSearchParams();
@@ -309,6 +328,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     },
 
+    // 把 ISO 时间格式化为 "YYYY-MM-DD HH:mm"
     formatDateTime(isoString) {
       const date = new Date(isoString);
       const year = date.getFullYear();
@@ -320,6 +340,7 @@ document.addEventListener("DOMContentLoaded", () => {
     },
 
     // 创建任务卡片
+    // 构建单个任务卡片 DOM，并对进行中的任务启动进度轮询
     async createTaskCard(task) {
       console.log("创建任务卡片:", task.id, "is_favorite:", task.is_favorite);
 
@@ -418,6 +439,7 @@ document.addEventListener("DOMContentLoaded", () => {
     },
 
     // 启动进度轮询以更新进度条 (保持不变)
+    // 定时轮询任务进度，更新进度条/状态点，任务结束或卡片移除时停止
     async startProgressPolling(taskId) {
       let lastProgress = -1;
       let lastStatus = "";
@@ -523,6 +545,7 @@ document.addEventListener("DOMContentLoaded", () => {
       this.config.pollingIntervals.set(taskId, intervalId);
     },
 
+    // 拉取任务并整体重建列表（含分页、事件绑定、筛选提示）
     async updateTaskList() {
       const taskList = document.getElementById("project-list");
       taskList.innerHTML =
@@ -563,6 +586,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     },
 
+    // 更新分页信息文字与上一页/下一页按钮的禁用状态
     updatePagination() {
       document.getElementById("page-info").textContent =
         `第 ${this.config.currentPage} 页，共 ${this.config.totalPages} 页`;
@@ -574,6 +598,7 @@ document.addEventListener("DOMContentLoaded", () => {
         this.config.currentPage === this.config.totalPages;
     },
 
+    // 用事件委托绑定动态卡片上的收藏/删除/详情按钮点击
     bindDynamicEvents() {
       // 移除旧的事件监听器
       if (this.globalClickHandler) {
@@ -617,6 +642,7 @@ document.addEventListener("DOMContentLoaded", () => {
         // 处理删除按钮点击
         const deleteBtn = e.target.closest(".delete-btn");
         if (deleteBtn) {
+          // 二次确认后发送 DELETE 请求，成功则刷新列表
           const taskId = deleteBtn.dataset.taskId;
           console.log("删除按钮点击，任务ID:", taskId);
 
@@ -668,6 +694,7 @@ document.addEventListener("DOMContentLoaded", () => {
       document.addEventListener("click", this.globalClickHandler);
     },
     // 5. 添加收藏状态变化监听器
+    // 监听其他页面发来的收藏变化消息，同步更新本页星标
     bindMessageListener() {
       window.addEventListener("message", (event) => {
         if (event.data.type === "favoriteChanged") {
@@ -682,6 +709,7 @@ document.addEventListener("DOMContentLoaded", () => {
     },
 
     // 6. 添加更新任务收藏显示的函数
+    // 按任务 ID 找到卡片并更新其星标显示
     updateTaskFavoriteDisplay(taskId, isFavorite) {
       const card = document.querySelector(`[data-task-id="${taskId}"]`);
       if (card) {
@@ -691,6 +719,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
     },
+    // 从 cookie 中读取 CSRF token，供写操作请求携带
     getCSRFToken() {
       const cookieValue = document.cookie
         .split("; ")
@@ -701,6 +730,7 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   // 分页控制
+  // 分页控制：上一页/下一页按钮
   document.getElementById("prev-page").addEventListener("click", () => {
     if (TaskManager.config.currentPage > 1) {
       TaskManager.config.currentPage--;
@@ -716,6 +746,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // 初始化加载与事件绑定
+  // 初始化：绑定筛选事件、加载任务列表、监听收藏同步消息
   TaskManager.bindFilterEvents();
   TaskManager.updateTaskList();
 
@@ -723,6 +754,7 @@ document.addEventListener("DOMContentLoaded", () => {
   TaskManager.bindMessageListener();
 
   // 清理轮询
+  // 清理轮询：页面卸载时清除所有进度定时器
   window.addEventListener("beforeunload", () => {
     TaskManager.config.pollingIntervals.forEach((interval, taskId) => {
       clearInterval(interval);

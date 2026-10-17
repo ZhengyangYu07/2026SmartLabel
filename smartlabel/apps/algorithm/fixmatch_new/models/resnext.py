@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】FixMatch 半监督图像分类中的 ResNeXt 骨干网络定义。
+"""
+
 import logging
 
 import torch

@@ -1,4 +1,5 @@
 """
+【暂未实际使用】TorchSSL FlexMatch 的轻量适配器，便于平台用已有 DataLoader 与自定义模型调用其训练/评估接口。
 FlexMatch Adapter
 
 提供一个轻量适配器，允许平台使用已有的 PyTorch DataLoader 和自定义模型直接调用 FlexMatch 的训练/评估接口。

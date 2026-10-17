@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】ReTest 的彩色日志器初始化工具。
+"""
 import logging
 import colorlog # type: ignore
 

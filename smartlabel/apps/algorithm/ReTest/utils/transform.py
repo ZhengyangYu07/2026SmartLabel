@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】ReTest 的图像训练/评估数据增强与预处理变换。
+"""
 from typing import Callable
 from torchvision import transforms # type: ignore
 from PIL import Image

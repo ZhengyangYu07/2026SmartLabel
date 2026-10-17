@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】ReTest 主动学习框架的主入口，串联数据加载、转移矩阵估计与去噪流程。
+"""
 import os
 import logging
 import json

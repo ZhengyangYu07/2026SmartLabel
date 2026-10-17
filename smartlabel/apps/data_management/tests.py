@@ -1,3 +1,9 @@
+"""
+数据管理应用的单元测试。
+
+聚焦 _get_label_verification_stats 的统计口径：确认“未验证的已标注数”不会把
+未标注候选样本算进去（人工标注的 confidence=-1，算法候选样本才有真实置信度）。
+"""
 from django.test import TestCase
 from django.contrib.auth.models import User
 
@@ -7,6 +13,7 @@ from .views import _get_label_verification_stats
 
 class TextClassificationStatsTests(TestCase):
     def test_unverified_labeled_count_excludes_unlabeled_candidates(self):
+        """文本分类：校验统计不把未标注候选样本计入已标注口径。"""
         user = User.objects.create_user(username='stats-user', password='pass')
         task = Task.objects.create(
             user=user,
@@ -40,6 +47,7 @@ class TextClassificationStatsTests(TestCase):
 
 class ImageClassificationStatsTests(TestCase):
     def test_unverified_labeled_count_excludes_unlabeled_candidates(self):
+        """图像分类：同上统计口径的校验。"""
         user = User.objects.create_user(username='image-stats-user', password='pass')
         task = Task.objects.create(
             user=user,

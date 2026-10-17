@@ -1,3 +1,10 @@
+"""
+数据管理应用的 Django Admin 配置。
+
+把核心模型注册到后台并定制列表/筛选/搜索，便于运维排查：
+Task、ImageResult、TextResult，以及半监督闭环的三张表
+（PositiveIndex 正样本索引、MissFixTable 漏检补框、ReviewQueueCache 复核队列缓存）。
+"""
 from django.contrib import admin
 
 from .models import MissFixTable, PositiveIndex, ReviewQueueCache, Task, ImageResult, TextResult

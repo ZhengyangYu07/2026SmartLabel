@@ -1,4 +1,5 @@
 {% extends "platform/components/base_task_h.html" %}
+<!-- 目标检测标注页：LabelMe 风格画布，绘制矩形/多边形/点/线并管理标注框 -->
 {% load static %}
 
 {% block task_page_title %}&#30446;&#26631;&#26816;&#27979;&#26631;&#27880;{% endblock %}
@@ -6,6 +7,7 @@
 {% block css %}
 {{ block.super }}
 <style>
+  /* 目标检测标注界面样式（工具栏 / 画布 / 标注框 / 侧栏） */
   .lm-window {
     height: 720px;
     min-height: 0;
@@ -516,6 +518,7 @@
 {% endblock %}
 
 {% block task_table %}
+<!-- 标注窗口：顶部工具栏 + 左侧图片队列 + 绘制工具栏 + 画布 + 右侧标注框列表 + 底部状态栏 -->
 <div class="lm-window mt-4">
   <div class="lm-topbar">
     <div class="lm-topbar-section lm-topbar-queue">
@@ -598,6 +601,7 @@
   </div>
 </div>
 
+<!-- 轻提示浮层 -->
 <div id="det-toast" class="det-toast"></div>
 {% endblock %}
 

@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】英文文本分类的准确率评估脚本，对比预测结果与真实标签并统计各方法准确率。
+"""
+
 import json
 import pandas as pd
 from sklearn.metrics import accuracy_score

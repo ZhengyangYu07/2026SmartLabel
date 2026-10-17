@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】FixMatch 半监督图像分类的推理测试脚本，加载模型对单张图像预测并输出标签。
+"""
+
 import argparse
 import json
 import torch

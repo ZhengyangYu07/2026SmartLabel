@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】flexmatch 主题分类模型封装，聚合 CG3、LLGC、Manifold、MixText 等分类器。
+"""
 from models.CG3_Paper import CG3_Paper
 from models.LLGC import llgc_predict
 from models.ManifoldClassifier import ManifoldClassifier

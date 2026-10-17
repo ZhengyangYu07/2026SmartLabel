@@ -1,4 +1,8 @@
-"""BERT 文本数据集定义"""
+"""
+【暂未实际使用】BERT 文本分类算法中的数据集定义，将文本与标签封装为可训练的 Dataset。
+
+BERT 文本数据集定义
+"""
 
 import torch
 from torch.utils.data import Dataset

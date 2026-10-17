@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-"""@file: CWD.py
+"""
+【暂未实际使用】ReTest 框架的类别级去噪（CWD）噪声标签修正算法实现。
+@file: CWD.py
 @brief: Implementation of Class-Wise Denoising (CWD) for noisy label correction.
 @date: 2024-01-01
 @version: 1.0   

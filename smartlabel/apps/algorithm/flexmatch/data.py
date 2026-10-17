@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】flexmatch 主题分类的数据样本定义与归一化处理工具。
+"""
 from dataclasses import dataclass
 from typing import List, Sequence
 

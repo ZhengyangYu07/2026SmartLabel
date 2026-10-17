@@ -1,3 +1,6 @@
+"""
+【暂未实际使用】ReTest 的 DenseNet 骨干网络实现。
+"""
 import math
 import torch
 import torch.nn as nn

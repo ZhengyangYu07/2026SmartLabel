@@ -1,20 +1,23 @@
 
 {%  extends 'platform/components/base_documents.html' %}
-
+<!-- 用户手册：SmartLabel 平台介绍页 -->
 
 {% block title %}
     平台介绍
 {% endblock %}
 
+<!-- 面包屑导航：平台介绍 -->
 {% block breadcrumb %}
     <span>平台介绍</span>
 {% endblock %}
 
 {% block content %}
    
+<!-- 介绍区：页面内嵌样式与内容容器 -->
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- 介绍文本的居中与排版样式 -->
     <style>
         body, html {
             height: 100%;
@@ -34,6 +37,7 @@
     </style>
 </head>
 <body>
+    <!-- 平台介绍正文：配图 + 平台定位/功能/发展方向的说明文字 -->
     <div class="center-text">
         {% load static %}
         <img src="{% static 'img/documents/production.png' %}" >

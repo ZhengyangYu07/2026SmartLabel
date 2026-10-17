@@ -1,10 +1,8 @@
 """
-WSGI config for smartlabel project.
+WSGI 部署入口，模块级变量 application 即 WSGI 可调用对象。
 
-It exposes the WSGI callable as a module-level variable named ``application``.
-
-For more information on this file, see
-https://docs.djangoproject.com/en/4.2/howto/deployment/wsgi/
+注意：这里指向 smartlabel.settings（即 base，未定义 SECRET_KEY），
+如需以 WSGI 部署，应改指向 settings.dev 或补全 settings.prov。
 """
 
 import os

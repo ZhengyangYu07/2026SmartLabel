@@ -1,3 +1,7 @@
+"""
+【暂未实际使用】文本分类算法中的 MixText 分类器，提供 MixUp 数据混合与全连接分类网络。
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

@@ -1,10 +1,8 @@
 """
-ASGI config for smartlabel project.
+ASGI 部署入口，模块级变量 application 即 ASGI 可调用对象。
 
-It exposes the ASGI callable as a module-level variable named ``application``.
-
-For more information on this file, see
-https://docs.djangoproject.com/en/4.2/howto/deployment/asgi/
+注意：这里指向 smartlabel.settings（即 base，未定义 SECRET_KEY），
+如需以 ASGI 部署，应改指向 settings.dev 或补全 settings.prov。
 """
 
 import os

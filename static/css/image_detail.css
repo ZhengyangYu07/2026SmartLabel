@@ -1,3 +1,9 @@
+/**
+ * 图片明细页样式（image_detail）。
+ * 作用于图片数据集表格：表头筛选/排序下拉、图片预览列、预测标签的编辑与建议列表、
+ * 列宽设定、校验状态标签，以及图片预览模态框、去噪处理模态框和全局加载覆盖层。
+ */
+
 /* 通用表格样式 */
 table {
   width: 100%;
@@ -184,6 +190,7 @@ table th .custom-select .options-wrapper {
   min-height: 200px;
 }
 
+/* 关闭按钮（模态框右上角圆形按钮） */
 .close {
   position: absolute;
   top: -10px; /* 调整位置，使其在模态框外部 */
@@ -423,6 +430,7 @@ td[data-status] {
   height: 30px;
   animation: spin 1s linear infinite;
 }
+/* 加载动画：圆环旋转 */
 @keyframes spin {
   0% {
     transform: rotate(0deg);
